@@ -1,0 +1,22 @@
+ontology:
+  stage:
+    pyrolysis: ["pyrolysis", "热解", "热分解"]
+    gasification: ["gasification", "气化"]
+    coupled: ["coupled", "耦合", "联立", "combined"]
+
+  gas_agent:
+    steam: ["steam", "蒸汽", "H2O", "water vapor"]
+    o2: ["o2", "oxygen", "氧气", "纯氧"]
+    air: ["air", "空气"]
+    co2: ["co2", "carbon dioxide", "二氧化碳"]
+    n2: ["n2", "nitrogen", "氮气"]
+
+  pollutants:
+    NH3: ["NH3", "ammonia", "氨"]
+    HCN: ["HCN", "hydrogen cyanide", "氰化氢"]
+    NOx: ["NOx", "NOX", "nitrogen oxides", "氮氧化物"]
+    H2S: ["H2S", "hydrogen sulfide", "硫化氢"]
+    SO2: ["SO2", "sulfur dioxide", "二氧化硫"]
+    COS: ["COS", "carbonyl sulfide", "羰基硫"]
+    benzene: ["benzene", "C6H6", "苯"]
+    phenols: ["phenol", "phenols", "酚", "酚类"]

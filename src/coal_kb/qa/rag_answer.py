@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from ..llm.factory import LLMConfig, make_chat_llm
 
 
 def format_citation(d: Document) -> str:
@@ -35,12 +38,13 @@ class RAGAnswerer:
 
     enable_llm: bool = False
     llm_provider: str = "none"  # "openai"
+    llm_config: Optional[LLMConfig] = None
 
     def answer(self, query: str, docs: List[Document]) -> str:
         if not docs:
             return "未检索到相关证据。建议：放宽条件（温度/压力范围）或减少过滤条件（气化剂/阶段）。"
 
-        if self.enable_llm and self.llm_provider == "openai":
+        if self.enable_llm and self.llm_provider != "none":
             out = self._answer_openai(query=query, docs=docs)
             if out:
                 return out
@@ -52,12 +56,6 @@ class RAGAnswerer:
         )
 
     def _answer_openai(self, *, query: str, docs: List[Document]) -> Optional[str]:
-        try:
-            from langchain_openai import ChatOpenAI  # type: ignore
-            from langchain_core.messages import SystemMessage, HumanMessage
-        except Exception:
-            return None
-
         sys_prompt = (
             "你是煤炭热解/气化污染物领域的严谨助理。"
             "你必须仅根据提供的证据回答，并在每条关键结论后标注证据编号，例如[1][2]。"
@@ -71,6 +69,9 @@ class RAGAnswerer:
         evidence = build_evidence_block(docs, max_chars=1200)
         user = f"问题：{query}\n\n证据：\n{evidence}"
 
-        model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        if self.llm_config is None:
+            return None
+
+        model = make_chat_llm(self.llm_config)
         rsp = model.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user)])
         return getattr(rsp, "content", None) or None

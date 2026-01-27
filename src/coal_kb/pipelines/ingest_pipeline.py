@@ -8,14 +8,12 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 from tqdm import tqdm
-from ..llm.factory import LLMConfig, make_chat_llm
-
-
+from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from ..chunking.splitter import split_page_docs
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
-from ..parsing.pdf_loader import load_pdfs_from_dir
+from ..parsing.pdf_loader import load_pdf_pages
 from ..parsing.table_extractor import TableExtractor
 from ..settings import AppConfig
 from ..store.chroma_store import ChromaStore
@@ -64,8 +62,16 @@ class IngestPipeline:
 
         onto = Ontology.load("configs/schema.yaml")
 
+        llm_cfg = LLMConfig(**self.cfg.llm.model_dump())
+        llm_provider = self.llm_provider
+        if self.enable_llm_metadata and llm_provider == "none":
+            llm_provider = self.cfg.llm.provider
+
         extractor = MetadataExtractor(
-            onto=onto, enable_llm=self.enable_llm_metadata, llm_provider=self.llm_provider
+            onto=onto,
+            enable_llm=self.enable_llm_metadata,
+            llm_provider=llm_provider,
+            llm_config=llm_cfg,
         )
 
         # Vectorstore
@@ -77,7 +83,18 @@ class IngestPipeline:
         )
 
         # Load PDFs (page-level)
-        page_docs = load_pdfs_from_dir(raw_dir)
+        page_docs: List[Document] = []
+        for pdf_path in sorted(raw_dir.rglob("*.pdf")):
+            cache_path = _cache_path_for_pdf(interim_dir, str(pdf_path))
+            cached = _load_pages_cache(cache_path)
+            if cached is not None:
+                page_docs.extend(cached)
+                continue
+
+            docs = load_pdf_pages(pdf_path)
+            if docs:
+                _save_pages_cache(cache_path, docs)
+                page_docs.extend(docs)
 
         # Optional: table extraction (as extra docs)
         if self.enable_table_extraction:

@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from ..llm.factory import LLMConfig, make_chat_llm
 from ..schema.models import ExperimentRecord
 from ..schema.pollutants import normalize_pollutants_dict
 from ..schema.validators import (
@@ -89,27 +91,23 @@ def extract_evidence_quote(text: str, pollutants: Dict[str, Any]) -> Optional[st
 class RecordExtractor:
     enable_llm: bool = False
     llm_provider: str = "none"
+    llm_config: Optional[LLMConfig] = None
 
     def extract_records(self, *, text: str) -> List[Dict[str, Any]]:
         if not self.enable_llm or self.llm_provider == "none":
             return []
-        if self.llm_provider == "openai":
-            return self._extract_with_openai(text=text)
-        return []
+        return self._extract_with_openai(text=text)
 
     def _extract_with_openai(self, *, text: str) -> List[Dict[str, Any]]:
-        try:
-            from langchain_openai import ChatOpenAI  # type: ignore
-            from langchain_core.messages import SystemMessage, HumanMessage
-        except Exception as e:
-            logger.warning("langchain-openai not installed; record extraction disabled. %s", e)
+        if self.llm_config is None:
+            logger.warning("LLM config missing; record extraction disabled.")
             return []
 
         prompt_path = "configs/prompts/record_extract.txt"
         with open(prompt_path, "r", encoding="utf-8") as f:
             sys_prompt = f.read().strip()
 
-        model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        model = make_chat_llm(self.llm_config)
         msgs = [SystemMessage(content=sys_prompt), HumanMessage(content=f"片段:\n{text}\n\n请输出严格 JSON 数组。")]
         rsp = model.invoke(msgs)
         content = getattr(rsp, "content", None) or ""
@@ -135,7 +133,19 @@ class RecordPipeline:
 
     def run(self, docs: List[Document]) -> dict:
         store = SQLiteStore(self.cfg.paths.sqlite_path)
-        extractor = RecordExtractor(enable_llm=self.enable_llm_records, llm_provider=self.llm_provider)
+        llm_provider = self.llm_provider
+        if self.enable_llm_records and llm_provider == "none":
+            llm_provider = self.cfg.llm.provider
+
+        llm_cfg = LLMConfig(**self.cfg.llm.model_dump())
+        extractor = RecordExtractor(
+            enable_llm=self.enable_llm_records,
+            llm_provider=llm_provider,
+            llm_config=llm_cfg,
+        )
+
+        if not self.enable_llm_records or llm_provider == "none":
+            logger.warning("RecordPipeline running without LLM; no records will be extracted.")
 
         n_attempt = 0
         n_saved = 0

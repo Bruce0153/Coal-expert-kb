@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 
 def _cache_path_for_pdf(interim_dir: Path, pdf_path: str) -> Path:
     # stable cache file name
-    safe = stable_chunk_id(pdf_path)
+    p = Path(pdf_path)
+    try:
+        stamp = str(p.stat().st_mtime_ns)
+    except FileNotFoundError:
+        stamp = "missing"
+    safe = stable_chunk_id(pdf_path, stamp)
     return interim_dir / f"pages_{safe}.jsonl"
 
 
@@ -62,10 +67,11 @@ class IngestPipeline:
 
         onto = Ontology.load("configs/schema.yaml")
 
-        llm_cfg = LLMConfig(**self.cfg.llm.model_dump())
         llm_provider = self.llm_provider
         if self.enable_llm_metadata and llm_provider == "none":
             llm_provider = self.cfg.llm.provider
+        provider = llm_provider if llm_provider != "none" else self.cfg.llm.provider
+        llm_cfg = LLMConfig(**{**self.cfg.llm.model_dump(), "provider": provider})
 
         extractor = MetadataExtractor(
             onto=onto,

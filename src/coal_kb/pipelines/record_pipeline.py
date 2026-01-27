@@ -137,7 +137,8 @@ class RecordPipeline:
         if self.enable_llm_records and llm_provider == "none":
             llm_provider = self.cfg.llm.provider
 
-        llm_cfg = LLMConfig(**self.cfg.llm.model_dump())
+        provider = llm_provider if llm_provider != "none" else self.cfg.llm.provider
+        llm_cfg = LLMConfig(**{**self.cfg.llm.model_dump(), "provider": provider})
         extractor = RecordExtractor(
             enable_llm=self.enable_llm_records,
             llm_provider=llm_provider,

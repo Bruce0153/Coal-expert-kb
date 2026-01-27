@@ -7,6 +7,7 @@ from coal_kb.logging import setup_logging
 from coal_kb.pipelines.record_pipeline import RecordPipeline
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
+from coal_kb.embeddings.factory import EmbeddingsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ def main() -> None:
     store = ChromaStore(
         persist_dir=cfg.paths.chroma_dir,
         collection_name=cfg.chroma.collection_name,
+        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
         embedding_model=cfg.embedding.model_name,
     )
 

@@ -4,6 +4,7 @@ import argparse
 import logging
 
 from coal_kb.logging import setup_logging
+from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.llm.factory import LLMConfig
 from coal_kb.metadata.normalize import Ontology
 from coal_kb.qa.rag_answer import RAGAnswerer
@@ -35,6 +36,7 @@ def main() -> None:
     store = ChromaStore(
         persist_dir=cfg.paths.chroma_dir,
         collection_name=cfg.chroma.collection_name,
+        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
         embedding_model=cfg.embedding.model_name,
     )
 
@@ -43,7 +45,8 @@ def main() -> None:
     if args.llm and llm_provider == "none":
         llm_provider = cfg.llm.provider
 
-    llm_cfg = LLMConfig(**cfg.llm.model_dump())
+    provider = llm_provider if llm_provider != "none" else cfg.llm.provider
+    llm_cfg = LLMConfig(**{**cfg.llm.model_dump(), "provider": provider})
     answerer = RAGAnswerer(
         enable_llm=args.llm,
         llm_provider=llm_provider,

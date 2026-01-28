@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.documents import Document
 
 from .bm25 import bm25_rank, rrf_fuse
+from .rerank import CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
 
@@ -72,24 +73,74 @@ class ExpertRetriever:
     vector_retriever_factory: Any  # e.g. ChromaStore.as_retriever
     k: int = 6
     k_candidates: int = 40
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = 20
 
-    def retrieve(self, query: str, parsed_filter: Dict[str, Any]) -> List[Document]:
+    def retrieve(
+        self,
+        query: str,
+        parsed_filter: Dict[str, Any],
+        trace: Optional[Dict[str, Any]] = None,
+    ) -> List[Document]:
         where = self._build_where_minimal(parsed_filter)
+        logger.info("Retrieval: vector search | where=%s k_candidates=%d", where, self.k_candidates)
         vec_retriever = self.vector_retriever_factory(k=self.k_candidates, where=where)
 
-        vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        if hasattr(vec_retriever, "get_relevant_documents"):
+            vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        else:
+            vector_docs = vec_retriever.invoke(query)
 
+        vector_top = [self._format_citation(d) for d in vector_docs[:3]]
+        if trace is not None:
+            trace["where"] = where
+            trace["vector_candidates"] = len(vector_docs)
+            trace["vector_top_citations"] = vector_top
         if not vector_docs:
+            logger.info("Retrieval: no vector candidates.")
             return []
 
         # Step 2: BM25 on candidate set + RRF fuse
+        logger.info("Retrieval: BM25+RRF fuse | candidates=%d", len(vector_docs))
         bm25_ranked = [d for d, _s in bm25_rank(query, vector_docs)]
         fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
+        if trace is not None:
+            trace["fused_candidates"] = len(fused_docs)
 
         # Step 1: OR-first post-filtering
-        out = self._post_filter_and_rank(fused_docs, parsed_filter)
+        logger.info("Retrieval: post-filtering | candidates=%d", len(fused_docs))
+        filtered = self._post_filter_and_rank(fused_docs, parsed_filter)
+        if trace is not None:
+            trace["postfiltered_count"] = len(filtered)
 
-        return out[: self.k]
+        if self.rerank_enabled and filtered:
+            logger.info("Retrieval: rerank | top_k=%d model=%s", self.rerank_top_k, self.rerank_model)
+            top_k = min(self.rerank_top_k, len(filtered))
+            reranker = CrossEncoderReranker(model_name=self.rerank_model)
+            reranked = reranker.rerank(query, filtered[:top_k], top_k=top_k)
+
+            reranked_keys = {_doc_key(d) for d in reranked}
+            remainder = [d for d in filtered[top_k:] if _doc_key(d) not in reranked_keys]
+            filtered = reranked + remainder
+
+        final_docs = filtered[: self.k]
+        if trace is not None:
+            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
+        logger.info("Retrieval: done | final=%d", len(final_docs))
+        return final_docs
+
+    def _format_citation(self, d: Document) -> str:
+        m = d.metadata or {}
+        src = m.get("source_file", "unknown")
+        page_label = m.get("page_label")
+        page = m.get("page")
+        chunk_id = m.get("chunk_id", "")
+        if page_label:
+            return f"{src} ({page_label}) #{chunk_id}"
+        if isinstance(page, int):
+            return f"{src} (page {page + 1}) #{chunk_id}"
+        return f"{src} #{chunk_id}"
 
     def _build_where_minimal(self, f: Dict[str, Any]) -> Dict[str, Any]:
         """

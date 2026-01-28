@@ -20,7 +20,6 @@ class FilterParser:
 
     def parse(self, query: str) -> Dict[str, Any]:
         q = query.strip()
-        q_low = q.lower()
 
         # stage & gas
         stage = normalize_stage(q, self.onto)

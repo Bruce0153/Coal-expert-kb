@@ -1,0 +1,3 @@
+{"question":"steam gasification 1200K 2MPa NH3 HCN","gold_sources":[{"source_contains":"paper1.pdf","page":5}]}
+{"question":"热解 800C 酚类 生成机理","gold_sources":[{"source_contains":"paper2.pdf"}]}
+{"question":"CO2 gasification NOx 1000-1200K","gold_sources":[{"source_contains":"paper3.pdf","page":12}]}

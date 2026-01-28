@@ -68,13 +68,14 @@ def main() -> None:
     stats = pipe.run(rebuild=args.rebuild, force=args.force)
     elapsed = stats.get("elapsed_s", round(time.monotonic() - start, 2))
     logger.info(
-        "Ingest summary | scanned=%s changed=%s removed=%s pages=%s chunks=%s indexed=%s elapsed=%.2fs",
+        "Ingest summary | scanned=%s changed=%s removed=%s pages=%s chunks=%s indexed=%s dropped=%s elapsed=%.2fs",
         stats.get("pdfs_scanned"),
         stats.get("pdfs_changed"),
         stats.get("pdfs_removed"),
         stats.get("pages_parsed"),
         stats.get("chunks"),
         stats.get("indexed"),
+        stats.get("dropped_chunks"),
         elapsed,
     )
     print(stats)

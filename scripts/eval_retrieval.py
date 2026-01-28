@@ -6,19 +6,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-
+from coal_kb.chunking.sectioner import is_reference_like
+from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
 from coal_kb.retrieval.filter_parser import FilterParser
+from coal_kb.retrieval.query_rewrite import rewrite_query
 from coal_kb.retrieval.retriever import ExpertRetriever
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
-from coal_kb.embeddings.factory import EmbeddingsConfig
 
 
 @dataclass
 class EvalItem:
-    question: str
-    gold_sources: List[Dict[str, Any]]
+    query: str
+    expected_sources: List[Dict[str, Any]]
+    expected_stage: Optional[str] = None
 
 
 def load_eval_set(path: Path) -> List[EvalItem]:
@@ -27,19 +29,28 @@ def load_eval_set(path: Path) -> List[EvalItem]:
         if not line.strip():
             continue
         obj = json.loads(line)
-        items.append(EvalItem(question=obj["question"], gold_sources=obj.get("gold_sources") or []))
+        items.append(
+            EvalItem(
+                query=obj["query"],
+                expected_sources=obj.get("expected_sources") or [],
+                expected_stage=obj.get("expected_stage"),
+            )
+        )
     return items
 
 
 def match_gold(gold: Dict[str, Any], meta: Dict[str, Any]) -> bool:
-    contains = str(gold.get("source_contains", "")).lower()
-    page = gold.get("page", None)
+    chunk_id = gold.get("chunk_id")
+    if chunk_id and str(meta.get("chunk_id")) == str(chunk_id):
+        return True
     src = str(meta.get("source_file", "")).lower()
-    if contains and contains not in src:
+    page = gold.get("page", None)
+    source_file = str(gold.get("source_file", "")).lower()
+    if source_file and source_file not in src:
         return False
     if page is not None:
         return meta.get("page") == page
-    return True
+    return bool(source_file)
 
 
 def range_overlap(meta: Dict[str, Any], query_range: Optional[List[float]], *, key_point: str, key_min: str, key_max: str) -> bool:
@@ -89,10 +100,24 @@ def recall_at_k(docs: List[Dict[str, Any]], gold_sources: List[Dict[str, Any]], 
     return False
 
 
+def _filter_precision_at_k(docs: List[Dict[str, Any]], parsed: Dict[str, Any], k: int) -> float:
+    if not docs:
+        return 0.0
+    hits = 0
+    for meta in docs[:k]:
+        checks = filter_match(meta, parsed)
+        if not checks:
+            continue
+        if all(checks.values()):
+            hits += 1
+    return hits / min(k, len(docs))
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate retrieval Recall@K and filter correctness.")
+    parser = argparse.ArgumentParser(description="Evaluate retrieval quality metrics.")
     parser.add_argument("--gold", default="data/eval/retrieval_gold.jsonl")
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--no-rewrite", action="store_true")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -112,41 +137,55 @@ def main() -> None:
         rerank_enabled=cfg.retrieval.rerank_enabled,
         rerank_model=cfg.retrieval.rerank_model,
         rerank_top_k=cfg.retrieval.rerank_top_k,
+        rerank_candidates=cfg.retrieval.rerank_candidates,
+        rerank_device=cfg.retrieval.rerank_device,
+        max_per_source=cfg.retrieval.max_per_source,
+        drop_sections=cfg.retrieval.drop_sections,
+        drop_reference_like=cfg.retrieval.drop_reference_like,
     )
 
     items = load_eval_set(Path(args.gold))
 
     recalls = {1: 0, 3: 0, 5: 0}
-    filter_counts: Dict[str, int] = {}
-    filter_hits: Dict[str, int] = {}
+    precisions: Dict[int, float] = {1: 0.0, 3: 0.0, 5: 0.0}
+    diversities: Dict[int, int] = {1: 0, 3: 0, 5: 0}
+    reference_hits: Dict[int, int] = {1: 0, 3: 0, 5: 0}
 
     for item in items:
-        parsed = parser_.parse(item.question)
-        docs = expert.retrieve(item.question, parsed)
+        parsed = parser_.parse(item.query)
+        query_text = item.query
+        if not args.no_rewrite:
+            rewrite = rewrite_query(item.query)
+            query_text = rewrite.query
+        docs = expert.retrieve(query_text, parsed)
         meta_list = [d.metadata or {} for d in docs]
 
         for k in (1, 3, 5):
-            if recall_at_k(meta_list, item.gold_sources, k):
+            if recall_at_k(meta_list, item.expected_sources, k):
                 recalls[k] += 1
-
-        if meta_list:
-            checks = filter_match(meta_list[0], parsed)
-            for key, ok in checks.items():
-                filter_counts[key] = filter_counts.get(key, 0) + 1
-                if ok:
-                    filter_hits[key] = filter_hits.get(key, 0) + 1
+            precisions[k] += _filter_precision_at_k(meta_list, parsed, k)
+            diversities[k] += len({m.get("source_file") for m in meta_list[:k] if m.get("source_file")})
+            if any(
+                (str(m.get("section", "")).lower() == "references") or is_reference_like(docs[i].page_content or "")
+                for i, m in enumerate(meta_list[:k])
+            ):
+                reference_hits[k] += 1
 
     total = max(len(items), 1)
     rows = [
         ["Recall@1", f"{recalls[1]}/{total}", f"{recalls[1] / total:.2f}"],
         ["Recall@3", f"{recalls[3]}/{total}", f"{recalls[3] / total:.2f}"],
         ["Recall@5", f"{recalls[5]}/{total}", f"{recalls[5] / total:.2f}"],
+        ["FilterPrecision@1", "-", f"{precisions[1] / total:.2f}"],
+        ["FilterPrecision@3", "-", f"{precisions[3] / total:.2f}"],
+        ["FilterPrecision@5", "-", f"{precisions[5] / total:.2f}"],
+        ["Diversity@1", "-", f"{diversities[1] / total:.2f}"],
+        ["Diversity@3", "-", f"{diversities[3] / total:.2f}"],
+        ["Diversity@5", "-", f"{diversities[5] / total:.2f}"],
+        ["ReferencesHit@1", f"{reference_hits[1]}/{total}", f"{reference_hits[1] / total:.2f}"],
+        ["ReferencesHit@3", f"{reference_hits[3]}/{total}", f"{reference_hits[3] / total:.2f}"],
+        ["ReferencesHit@5", f"{reference_hits[5]}/{total}", f"{reference_hits[5] / total:.2f}"],
     ]
-
-    for key in sorted(filter_counts.keys()):
-        hit = filter_hits.get(key, 0)
-        cnt = filter_counts[key]
-        rows.append([f"Filter@1 {key}", f"{hit}/{cnt}", f"{hit / max(cnt, 1):.2f}"])
 
     headers = ["Metric", "Count", "Score"]
     col_widths = [max(len(str(row[i])) for row in ([headers] + rows)) for i in range(3)]

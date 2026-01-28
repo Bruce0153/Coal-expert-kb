@@ -39,9 +39,11 @@ def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
         query="steam gasification",
         filters={"stage": "gasification"},
         top_chunk_ids=["c1"],
+        top_source_files=["a.pdf"],
         latency_ms=12.3,
         tenant_id=None,
         embedding_version="v1",
+        rerank_enabled=True,
     )
 
     registry.delete_chunks_by_document_id("doc1")

@@ -203,6 +203,9 @@ Optional: enable LLM metadata augmentation (**LLM is configured in app.yaml**):
 python scripts/ingest.py --llm-metadata
 ```
 
+By default, low-value sections (references/acknowledgements/appendix/contents) are **not** indexed.
+This keeps reference lists out of retrieval results.
+
 ### 5.1) Ingest into Elasticsearch (optional)
 
 Set `backend: elastic` (or `both`) in `configs/app.yaml`, then rebuild once:
@@ -227,6 +230,8 @@ Optional: LLM-grounded answer generation (still cites evidence):
 ```bash
 python scripts/ask.py --llm
 ```
+
+Mechanism-style queries are automatically expanded with academic terms (rule-based by default).
 
 ### 6.1) Switch backend at query time
 
@@ -319,6 +324,7 @@ Sections you will typically edit:
 
 - `paths`: where PDFs / outputs / DBs are stored
 - `chunking`: chunk size and overlap
+- `chunking.profile_by_section`: section-aware chunking profiles
 - `chroma.collection_name`: Chroma collection name
 - `embedding` (**local fallback**): e.g., `BAAI/bge-m3`
 - `embeddings` (**remote**): DashScope/OpenAI-compatible embeddings
@@ -327,6 +333,9 @@ Sections you will typically edit:
 - `registry.sqlite_path`: registry DB path (defaults to `storage/kb.db`)
 - `model_versions.embedding_version`: index version label (e.g., `v1`)
 - `elastic`: Elasticsearch settings + aliases
+- `ingest_clean`: drop low-value sections during ingest
+- `retrieval`: reranker, diversity (max_per_source), and reference filtering
+- `query_rewrite`: lightweight query expansion (optional LLM)
 
 > **Important:** if you change embedding backend/model (e.g., from local to DashScope), you must **rebuild Chroma**:
 >
@@ -367,6 +376,10 @@ Key options:
 - `--tables`: optional table extraction
 - `--llm-metadata`: enable LLM metadata augmentation (reads `cfg.llm`)
 
+Default cleaning:
+- drop sections: `references`, `acknowledgements`, `contents`, `appendix`
+- drop unknown chunks that look like reference lists
+
 ### Ask (`scripts/ask.py`)
 Inputs: user query  
 Outputs: evidence list (and optional LLM answer)
@@ -374,6 +387,9 @@ Outputs: evidence list (and optional LLM answer)
 Key options:
 - `--llm`: enable LLM answer generation (reads `cfg.llm`)
 - `--backend`: `chroma` | `elastic` | `both`
+
+Query rewrite:
+- mechanism queries (e.g., “生成机理 / formation mechanism”) are expanded with academic terms
 
 ### Index versioning (`scripts/index.py`)
 Manage Elasticsearch index versions and aliases.
@@ -398,6 +414,22 @@ curl -s "http://localhost:9200/coal_kb_chunks_current/_search?q=source_file:*.pd
 ```
 
 You can also use Kibana → Discover (index pattern: `coal_kb_chunks_*`).
+
+### Retrieval evaluation (`scripts/eval_retrieval.py`)
+
+Gold format (JSONL):
+
+```json
+{"query":"steam gasification NH3 1200K","expected_sources":[{"source_file":"example.pdf","page":3}],"expected_stage":"gasification"}
+```
+
+Run evaluation:
+
+```bash
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
+```
+
+Metrics include Recall@K, FilterPrecision@K, Diversity@K, and ReferencesHit@K.
 
 ### Extract records (`scripts/extract_records.py`)
 Inputs: chunks (from Chroma)  

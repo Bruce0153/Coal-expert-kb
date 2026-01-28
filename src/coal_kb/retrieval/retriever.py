@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 
 from .bm25 import bm25_rank, rrf_fuse
 from .rerank import CrossEncoderReranker
+from ..chunking.sectioner import is_reference_like
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,13 @@ class ExpertRetriever:
     k: int = 6
     k_candidates: int = 40
     rerank_enabled: bool = False
-    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_model: str = "BAAI/bge-reranker-base"
     rerank_top_k: int = 20
+    rerank_candidates: int = 50
+    rerank_device: str = "auto"
+    max_per_source: int = 2
+    drop_sections: Optional[List[str]] = None
+    drop_reference_like: bool = True
 
     def retrieve(
         self,
@@ -116,13 +122,15 @@ class ExpertRetriever:
 
         if self.rerank_enabled and filtered:
             logger.info("Retrieval: rerank | top_k=%d model=%s", self.rerank_top_k, self.rerank_model)
-            top_k = min(self.rerank_top_k, len(filtered))
-            reranker = CrossEncoderReranker(model_name=self.rerank_model)
-            reranked = reranker.rerank(query, filtered[:top_k], top_k=top_k)
+            candidate_k = min(self.rerank_candidates, len(filtered))
+            reranker = CrossEncoderReranker(model_name=self.rerank_model, device=self.rerank_device)
+            reranked = reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
 
             reranked_keys = {_doc_key(d) for d in reranked}
-            remainder = [d for d in filtered[top_k:] if _doc_key(d) not in reranked_keys]
+            remainder = [d for d in filtered[candidate_k:] if _doc_key(d) not in reranked_keys]
             filtered = reranked + remainder
+
+        filtered = self._apply_diversity(filtered)
 
         final_docs = filtered[: self.k]
         if trace is not None:
@@ -165,9 +173,16 @@ class ExpertRetriever:
         target_flags = [f"has_{t}" for t in targets] if isinstance(targets, list) else []
 
         kept: List[Tuple[Document, int, int, int]] = []
+        drop_sections = {s.lower() for s in (self.drop_sections or [])}
         # (doc, gas_match_count, target_match_count, coal_match)
         for d in docs:
             m = d.metadata or {}
+
+            section = str(m.get("section", "unknown")).lower()
+            if drop_sections and section in drop_sections:
+                continue
+            if self.drop_reference_like and is_reference_like(d.page_content or ""):
+                continue
 
             # numeric post-filter
             if not _doc_range_overlap(m, T_range, key_point="T_K", key_min="T_min_K", key_max="T_max_K"):
@@ -211,3 +226,16 @@ class ExpertRetriever:
 
         return [d for d, *_ in kept]
 
+    def _apply_diversity(self, docs: List[Document]) -> List[Document]:
+        if not docs or self.max_per_source <= 0:
+            return docs
+        counts: Dict[str, int] = {}
+        output: List[Document] = []
+        for d in docs:
+            src = str((d.metadata or {}).get("source_file", "unknown"))
+            counts.setdefault(src, 0)
+            if counts[src] >= self.max_per_source:
+                continue
+            counts[src] += 1
+            output.append(d)
+        return output

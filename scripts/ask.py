@@ -13,6 +13,7 @@ from coal_kb.qa.rag_answer import RAGAnswerer
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.retriever import ExpertRetriever
+from coal_kb.retrieval.query_rewrite import rewrite_query
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
 from coal_kb.store.elastic_store import ElasticStore
@@ -102,6 +103,11 @@ def main() -> None:
         rerank_enabled=rerank_enabled,
         rerank_model=rerank_model,
         rerank_top_k=rerank_top_k,
+        rerank_candidates=cfg.retrieval.rerank_candidates,
+        rerank_device=cfg.retrieval.rerank_device,
+        max_per_source=cfg.retrieval.max_per_source,
+        drop_sections=cfg.retrieval.drop_sections,
+        drop_reference_like=cfg.retrieval.drop_reference_like,
     )
     llm_provider = args.llm_provider
     if args.llm and llm_provider == "none":
@@ -120,20 +126,30 @@ def main() -> None:
         if not q:
             continue
         f = parser_.parse(q)
+        rewrite = rewrite_query(
+            q,
+            enable_llm=cfg.query_rewrite.enable_llm and args.llm,
+            llm_config=llm_cfg,
+        )
         print("\n解析到的过滤条件:")
         print(json.dumps(f, ensure_ascii=False, indent=2))
+        if rewrite.reason:
+            print(f"查询扩展: {rewrite.reason}")
+            print(rewrite.query)
         trace: dict = {}
         start = time.monotonic()
-        docs = expert.retrieve(q, f, trace=trace)
+        docs = expert.retrieve(rewrite.query, f, trace=trace)
         latency_ms = (time.monotonic() - start) * 1000
         _print_trace(trace, docs)
         registry.log_query(
-            query=q,
+            query=rewrite.query,
             filters=f,
             top_chunk_ids=[d.metadata.get("chunk_id") for d in docs],
+            top_source_files=[d.metadata.get("source_file") for d in docs],
             latency_ms=round(latency_ms, 2),
             tenant_id=None,
             embedding_version=cfg.model_versions.embedding_version,
+            rerank_enabled=expert.rerank_enabled,
         )
         ans = answerer.answer(q, docs)
         print("\n" + ans)

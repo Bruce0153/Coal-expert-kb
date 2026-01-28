@@ -12,7 +12,8 @@ from langchain_core.documents import Document
 from tqdm import tqdm
 from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
-from ..chunking.splitter import split_page_docs
+from ..chunking.advanced_splitter import split_page_docs_section_aware
+from ..chunking.sectioner import is_reference_like
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
 from ..parsing.pdf_loader import load_pdf_pages
@@ -366,6 +367,9 @@ class IngestPipeline:
                 "chunks": 0,
                 "indexed": 0,
                 "skipped": skipped_unchanged + skipped_same_hash,
+                "dropped_chunks": 0,
+                "dropped_by_section": {},
+                "dropped_reference_like": 0,
                 "elapsed_s": round(time.monotonic() - overall_start, 2),
             }
 
@@ -406,10 +410,14 @@ class IngestPipeline:
 
         # Chunk
         stage_start = time.monotonic()
-        chunks = split_page_docs(
+        profile_by_section = {
+            key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
+        }
+        chunks = split_page_docs_section_aware(
             page_docs,
-            chunk_size=self.cfg.chunking.chunk_size,
-            chunk_overlap=self.cfg.chunking.chunk_overlap,
+            default_chunk_size=self.cfg.chunking.chunk_size,
+            default_chunk_overlap=self.cfg.chunking.chunk_overlap,
+            profile_by_section=profile_by_section,
         )
         if chunks:
             avg_len = sum(len(c.page_content or "") for c in chunks) / len(chunks)
@@ -421,6 +429,31 @@ class IngestPipeline:
             avg_len,
             time.monotonic() - stage_start,
         )
+
+        drop_sections = {s.lower() for s in self.cfg.ingest_clean.drop_sections}
+        drop_unknown_ref_like = self.cfg.ingest_clean.drop_unknown_reference_like
+        dropped_by_section: Dict[str, int] = {}
+        dropped_reference_like = 0
+        kept_chunks: List[Document] = []
+        for ch in chunks:
+            section = str((ch.metadata or {}).get("section", "unknown")).lower()
+            if section in drop_sections:
+                dropped_by_section[section] = dropped_by_section.get(section, 0) + 1
+                continue
+            if section == "unknown" and drop_unknown_ref_like and is_reference_like(ch.page_content or ""):
+                dropped_reference_like += 1
+                continue
+            kept_chunks.append(ch)
+
+        if dropped_by_section or dropped_reference_like:
+            dropped_total = sum(dropped_by_section.values()) + dropped_reference_like
+            logger.info(
+                "Stage: chunk_filter | dropped=%d reference_like=%d by_section=%s",
+                dropped_total,
+                dropped_reference_like,
+                dropped_by_section,
+            )
+        chunks = kept_chunks
 
         indexed_docs: Dict[str, Document] = {}
         registry_chunks: List[Dict[str, Any]] = []
@@ -653,5 +686,8 @@ class IngestPipeline:
             "chunks": len(chunks),
             "indexed": indexed_count,
             "skipped": skipped_unchanged + skipped_same_hash,
+            "dropped_chunks": sum(dropped_by_section.values()) + dropped_reference_like,
+            "dropped_by_section": dropped_by_section,
+            "dropped_reference_like": dropped_reference_like,
             "elapsed_s": round(time.monotonic() - overall_start, 2),
         }

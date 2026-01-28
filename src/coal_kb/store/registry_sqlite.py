@@ -5,7 +5,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterable, Optional
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, create_engine, delete, select
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    delete,
+    select,
+    text as sql_text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
@@ -61,9 +71,11 @@ class QueryLogModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     query: Mapped[str] = mapped_column(Text)
-    filters_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_filter_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     top_chunk_ids_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    top_source_files_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[Optional[float]] = mapped_column(nullable=True)
+    rerank_enabled: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tenant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     embedding_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -76,6 +88,24 @@ class RegistrySQLite:
     def __post_init__(self) -> None:
         self._engine = create_engine(f"sqlite:///{self.sqlite_path}", future=True)
         Base.metadata.create_all(self._engine)
+        self._ensure_migrations()
+
+    def _has_column(self, table: str, col: str) -> bool:
+        with self._engine.connect() as conn:
+            rows = conn.execute(sql_text(f"PRAGMA table_info({table})")).fetchall()
+            return any(r[1] == col for r in rows)
+
+    def _ensure_column(self, table: str, col: str, ddl: str) -> None:
+        if self._has_column(table, col):
+            return
+        with self._engine.connect() as conn:
+            conn.execute(sql_text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+            conn.commit()
+
+    def _ensure_migrations(self) -> None:
+        self._ensure_column("query_logs", "parsed_filter_json", "parsed_filter_json TEXT")
+        self._ensure_column("query_logs", "top_source_files_json", "top_source_files_json TEXT")
+        self._ensure_column("query_logs", "rerank_enabled", "rerank_enabled INTEGER")
 
     def upsert_document(
         self,
@@ -179,16 +209,22 @@ class RegistrySQLite:
         query: str,
         filters: Optional[Dict[str, Any]],
         top_chunk_ids: Optional[list[str]],
+        top_source_files: Optional[list[str]],
         latency_ms: Optional[float],
         tenant_id: Optional[str],
         embedding_version: Optional[str],
+        rerank_enabled: Optional[bool],
     ) -> None:
         with Session(self._engine) as sess:
             obj = QueryLogModel(
                 query=query,
-                filters_json=json.dumps(filters, ensure_ascii=False) if filters else None,
+                parsed_filter_json=json.dumps(filters, ensure_ascii=False) if filters else None,
                 top_chunk_ids_json=json.dumps(top_chunk_ids, ensure_ascii=False) if top_chunk_ids else None,
+                top_source_files_json=json.dumps(top_source_files, ensure_ascii=False)
+                if top_source_files
+                else None,
                 latency_ms=latency_ms,
+                rerank_enabled=1 if rerank_enabled else 0 if rerank_enabled is not None else None,
                 tenant_id=tenant_id,
                 embedding_version=embedding_version,
                 created_at=datetime.utcnow(),

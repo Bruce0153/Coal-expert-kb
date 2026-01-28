@@ -38,7 +38,11 @@ def main() -> None:
 
     # A common trick: query a generic token to get "some" docs.
     # For full extraction, you'd implement a real scan iterator over Chroma collection.
-    docs = retriever.get_relevant_documents("gasification pyrolysis experimental conditions table results")
+    q = "gasification pyrolysis experimental conditions table results"
+    if hasattr(retriever, "invoke"):
+        docs = retriever.invoke(q)
+    else:
+        docs = retriever.get_relevant_documents(q)
 
     llm_provider = args.llm_provider
     if args.llm and llm_provider == "none":
@@ -51,3 +55,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

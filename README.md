@@ -508,10 +508,6 @@ DASHSCOPE_API_KEY=sk-xxxx
 python scripts/ingest.py
 ```
 
-Manifest checks (embeddings/chunking/schema) are automatic:
-- Use `--rebuild` to clear the KB and re-ingest when signatures change.
-- Use `--force` to ingest anyway (not recommended).
-
 Optional table extraction:
 
 ```bash

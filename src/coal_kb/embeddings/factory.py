@@ -25,9 +25,14 @@ def make_embeddings(cfg: EmbeddingsConfig) -> OpenAIEmbeddings:
         raise RuntimeError(f"Missing env var: {cfg.api_key_env}")
 
     kwargs = {}
+
     # DashScope embedding supports configurable dimensions for text-embedding-v4/v3
     if cfg.dimensions is not None:
         kwargs["dimensions"] = int(cfg.dimensions)
+
+    if cfg.provider == "dashscope":
+        kwargs["check_embedding_ctx_length"] = False
+        kwargs["chunk_size"] = 10
 
     return OpenAIEmbeddings(
         model=cfg.model,
@@ -35,3 +40,4 @@ def make_embeddings(cfg: EmbeddingsConfig) -> OpenAIEmbeddings:
         base_url=cfg.base_url,
         **kwargs,
     )
+

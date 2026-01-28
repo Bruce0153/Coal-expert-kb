@@ -16,6 +16,7 @@ class PathsConfig(BaseModel):
     artifacts_dir: str = "data/artifacts"
     chroma_dir: str = "storage/chroma_db"
     sqlite_path: str = "storage/expert.db"
+    manifest_path: str = "storage/manifest.json"
 
 
 # Local embedding (fallback): e.g., HuggingFace bge-m3
@@ -23,17 +24,71 @@ class LocalEmbeddingConfig(BaseModel):
     model_name: str = "BAAI/bge-m3"
 
 
+class ChunkingProfile(BaseModel):
+    chunk_size: int
+    chunk_overlap: int
+
+
 class ChunkingConfig(BaseModel):
     chunk_size: int = 900
     chunk_overlap: int = 120
+    profile_by_section: dict[str, ChunkingProfile] = Field(
+        default_factory=lambda: {
+            "results": ChunkingProfile(chunk_size=900, chunk_overlap=150),
+            "discussion": ChunkingProfile(chunk_size=900, chunk_overlap=150),
+            "methods": ChunkingProfile(chunk_size=650, chunk_overlap=120),
+            "conditions": ChunkingProfile(chunk_size=650, chunk_overlap=120),
+            "unknown": ChunkingProfile(chunk_size=750, chunk_overlap=120),
+        }
+    )
 
 
 class ChromaConfig(BaseModel):
     collection_name: str = "coal_gasification_papers"
 
 
+class RetrievalConfig(BaseModel):
+    rerank_enabled: bool = False
+    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_top_k: int = 20
+    rerank_candidates: int = 50
+    rerank_device: str = "auto"
+    max_per_source: int = 2
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_reference_like: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+
+
+class IngestCleanConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_unknown_reference_like: bool = True
+
+
+class QueryRewriteConfig(BaseModel):
+    enable_llm: bool = False
 
 
 # DashScope / OpenAI-compatible Chat LLM config
@@ -63,7 +118,14 @@ class AppConfig(BaseModel):
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    backend: str = "chroma"
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
+    model_versions: ModelVersionsConfig = Field(default_factory=ModelVersionsConfig)
+    elastic: ElasticConfig = Field(default_factory=ElasticConfig)
+    ingest_clean: IngestCleanConfig = Field(default_factory=IngestCleanConfig)
+    query_rewrite: QueryRewriteConfig = Field(default_factory=QueryRewriteConfig)
 
     # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -95,6 +157,7 @@ def _ensure_dirs(cfg: AppConfig) -> AppConfig:
     Path(cfg.paths.artifacts_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.chroma_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(cfg.registry.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
     return cfg
 
 

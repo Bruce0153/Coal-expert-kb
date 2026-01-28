@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.documents import Document
 
 from .bm25 import bm25_rank, rrf_fuse
+from .rerank import CrossEncoderReranker
+from ..chunking.sectioner import is_reference_like
 
 logger = logging.getLogger(__name__)
 
@@ -72,24 +74,81 @@ class ExpertRetriever:
     vector_retriever_factory: Any  # e.g. ChromaStore.as_retriever
     k: int = 6
     k_candidates: int = 40
+    rerank_enabled: bool = False
+    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_top_k: int = 20
+    rerank_candidates: int = 50
+    rerank_device: str = "auto"
+    max_per_source: int = 2
+    drop_sections: Optional[List[str]] = None
+    drop_reference_like: bool = True
 
-    def retrieve(self, query: str, parsed_filter: Dict[str, Any]) -> List[Document]:
+    def retrieve(
+        self,
+        query: str,
+        parsed_filter: Dict[str, Any],
+        trace: Optional[Dict[str, Any]] = None,
+    ) -> List[Document]:
         where = self._build_where_minimal(parsed_filter)
+        logger.info("Retrieval: vector search | where=%s k_candidates=%d", where, self.k_candidates)
         vec_retriever = self.vector_retriever_factory(k=self.k_candidates, where=where)
 
-        vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        if hasattr(vec_retriever, "get_relevant_documents"):
+            vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        else:
+            vector_docs = vec_retriever.invoke(query)
 
+        vector_top = [self._format_citation(d) for d in vector_docs[:3]]
+        if trace is not None:
+            trace["where"] = where
+            trace["vector_candidates"] = len(vector_docs)
+            trace["vector_top_citations"] = vector_top
         if not vector_docs:
+            logger.info("Retrieval: no vector candidates.")
             return []
 
         # Step 2: BM25 on candidate set + RRF fuse
+        logger.info("Retrieval: BM25+RRF fuse | candidates=%d", len(vector_docs))
         bm25_ranked = [d for d, _s in bm25_rank(query, vector_docs)]
         fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
+        if trace is not None:
+            trace["fused_candidates"] = len(fused_docs)
 
         # Step 1: OR-first post-filtering
-        out = self._post_filter_and_rank(fused_docs, parsed_filter)
+        logger.info("Retrieval: post-filtering | candidates=%d", len(fused_docs))
+        filtered = self._post_filter_and_rank(fused_docs, parsed_filter)
+        if trace is not None:
+            trace["postfiltered_count"] = len(filtered)
 
-        return out[: self.k]
+        if self.rerank_enabled and filtered:
+            logger.info("Retrieval: rerank | top_k=%d model=%s", self.rerank_top_k, self.rerank_model)
+            candidate_k = min(self.rerank_candidates, len(filtered))
+            reranker = CrossEncoderReranker(model_name=self.rerank_model, device=self.rerank_device)
+            reranked = reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
+
+            reranked_keys = {_doc_key(d) for d in reranked}
+            remainder = [d for d in filtered[candidate_k:] if _doc_key(d) not in reranked_keys]
+            filtered = reranked + remainder
+
+        filtered = self._apply_diversity(filtered)
+
+        final_docs = filtered[: self.k]
+        if trace is not None:
+            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
+        logger.info("Retrieval: done | final=%d", len(final_docs))
+        return final_docs
+
+    def _format_citation(self, d: Document) -> str:
+        m = d.metadata or {}
+        src = m.get("source_file", "unknown")
+        page_label = m.get("page_label")
+        page = m.get("page")
+        chunk_id = m.get("chunk_id", "")
+        if page_label:
+            return f"{src} ({page_label}) #{chunk_id}"
+        if isinstance(page, int):
+            return f"{src} (page {page + 1}) #{chunk_id}"
+        return f"{src} #{chunk_id}"
 
     def _build_where_minimal(self, f: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -114,9 +173,16 @@ class ExpertRetriever:
         target_flags = [f"has_{t}" for t in targets] if isinstance(targets, list) else []
 
         kept: List[Tuple[Document, int, int, int]] = []
+        drop_sections = {s.lower() for s in (self.drop_sections or [])}
         # (doc, gas_match_count, target_match_count, coal_match)
         for d in docs:
             m = d.metadata or {}
+
+            section = str(m.get("section", "unknown")).lower()
+            if drop_sections and section in drop_sections:
+                continue
+            if self.drop_reference_like and is_reference_like(d.page_content or ""):
+                continue
 
             # numeric post-filter
             if not _doc_range_overlap(m, T_range, key_point="T_K", key_min="T_min_K", key_max="T_max_K"):
@@ -159,3 +225,17 @@ class ExpertRetriever:
         )
 
         return [d for d, *_ in kept]
+
+    def _apply_diversity(self, docs: List[Document]) -> List[Document]:
+        if not docs or self.max_per_source <= 0:
+            return docs
+        counts: Dict[str, int] = {}
+        output: List[Document] = []
+        for d in docs:
+            src = str((d.metadata or {}).get("source_file", "unknown"))
+            counts.setdefault(src, 0)
+            if counts[src] >= self.max_per_source:
+                continue
+            counts[src] += 1
+            output.append(d)
+        return output

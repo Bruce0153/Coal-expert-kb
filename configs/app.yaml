@@ -4,6 +4,7 @@ paths:
   artifacts_dir: "data/artifacts"
   chroma_dir: "storage/chroma_db"
   sqlite_path: "storage/expert.db"
+  manifest_path: "storage/manifest.json"
 
 embedding:
   model_name: "BAAI/bge-m3"
@@ -11,12 +12,68 @@ embedding:
 chunking:
   chunk_size: 900
   chunk_overlap: 120
+  profile_by_section:
+    results:
+      chunk_size: 900
+      chunk_overlap: 150
+    discussion:
+      chunk_size: 900
+      chunk_overlap: 150
+    methods:
+      chunk_size: 650
+      chunk_overlap: 120
+    conditions:
+      chunk_size: 650
+      chunk_overlap: 120
+    unknown:
+      chunk_size: 750
+      chunk_overlap: 120
 
 chroma:
   collection_name: "coal_gasification_papers"
 
+retrieval:
+  rerank_enabled: false
+  rerank_model: "BAAI/bge-reranker-base"
+  rerank_top_k: 20
+  rerank_candidates: 50
+  rerank_device: "auto"
+  max_per_source: 2
+  drop_sections:
+    - references
+    - acknowledgements
+    - contents
+    - appendix
+  drop_reference_like: true
+
 logging:
   level: "INFO"
+
+backend: "chroma"
+
+registry:
+  sqlite_path: "storage/kb.db"
+
+model_versions:
+  embedding_version: "v1"
+
+elastic:
+  host: "http://localhost:9200"
+  index_prefix: "coal_kb_chunks"
+  alias_current: "coal_kb_chunks_current"
+  alias_prev: "coal_kb_chunks_prev"
+  verify_certs: false
+
+ingest_clean:
+  drop_sections:
+    - references
+    - acknowledgements
+    - contents
+    - appendix
+  drop_unknown_reference_like: true
+
+query_rewrite:
+  enable_llm: false
 
 llm:
   provider: dashscope

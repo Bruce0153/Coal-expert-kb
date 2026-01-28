@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
-
+import json
 
 @dataclass(frozen=True)
 class Ontology:
@@ -104,5 +104,17 @@ def flatten_for_filtering(meta: Dict[str, Any], onto: Ontology) -> Dict[str, Any
         for tg in targets:
             out[f"has_{tg}"] = True
 
-    return out
+    allowed = (str, int, float, bool, type(None))
 
+    def sanitize(v: Any) -> Any:
+        if isinstance(v, allowed):
+            return v
+        try:
+            return json.dumps(v, ensure_ascii=False)
+        except TypeError:
+            return str(v)
+
+    for k, v in list(out.items()):
+        out[k] = sanitize(v)
+
+    return out

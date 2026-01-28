@@ -33,11 +33,13 @@ class TableExtractor:
             logger.info("Camelot not installed; skip table extraction.")
             return []
 
+        logger.info("Table extraction start | pdf=%s flavor=%s", pdf_path, self.flavor)
         if self.flavor == "auto":
             tables = self._read_with_fallback(camelot, pdf_path)
         else:
             tables = self._read_single(camelot, pdf_path, self.flavor)
             if tables is None:
+                logger.warning("Table extraction failed | pdf=%s flavor=%s", pdf_path, self.flavor)
                 return []
 
         docs: List[Document] = []
@@ -56,7 +58,10 @@ class TableExtractor:
             except Exception as e:
                 logger.debug("Failed to convert table %s #%d: %s", pdf_path, i, e)
 
-        logger.info("Extracted %d tables from %s", len(docs), pdf_path)
+        if not docs:
+            logger.warning("No tables extracted | pdf=%s flavor=%s", pdf_path, self.flavor)
+        else:
+            logger.info("Extracted %d tables from %s", len(docs), pdf_path)
         return docs
 
     def _read_single(self, camelot: object, pdf_path: Path, flavor: str):
@@ -70,5 +75,7 @@ class TableExtractor:
         tables = self._read_single(camelot, pdf_path, "lattice")
         if tables and len(tables) > 0:
             return tables
+        if tables is not None:
+            logger.warning("Camelot lattice extracted 0 tables; falling back to stream for %s", pdf_path)
         tables = self._read_single(camelot, pdf_path, "stream")
         return tables or []

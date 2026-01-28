@@ -13,10 +13,20 @@ def format_citation(d: Document) -> str:
     m = d.metadata or {}
     src = m.get("source_file", "unknown")
     page = m.get("page", None)
+    page_label = m.get("page_label")
     chunk_id = m.get("chunk_id", "")
+    title = m.get("title")
+    title_str = ""
+    if isinstance(title, str) and title.strip():
+        short = title.strip()
+        if len(short) > 60:
+            short = short[:57].rstrip() + "..."
+        title_str = f"{short} — "
+    if page_label:
+        return f"{title_str}{src} ({page_label}) #{chunk_id}"
     if isinstance(page, int):
-        return f"{src} (page {page}) #{chunk_id}"
-    return f"{src} #{chunk_id}"
+        return f"{title_str}{src} (page {page + 1}) #{chunk_id}"
+    return f"{title_str}{src} #{chunk_id}"
 
 
 def build_evidence_block(docs: List[Document], *, max_chars: int = 900) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from coal_kb.logging import setup_logging
@@ -80,10 +81,44 @@ def main() -> None:
         if not q:
             continue
         f = parser_.parse(q)
-        docs = expert.retrieve(q, f)
+        print("\n解析到的过滤条件:")
+        print(json.dumps(f, ensure_ascii=False, indent=2))
+        trace: dict = {}
+        docs = expert.retrieve(q, f, trace=trace)
+        _print_trace(trace, docs)
         ans = answerer.answer(q, docs)
         print("\n" + ans)
 
 
 if __name__ == "__main__":
     main()
+
+
+def _print_trace(trace: dict, docs: list) -> None:
+    if not trace:
+        return
+    where = trace.get("where") or {}
+    counts = {
+        "vector": trace.get("vector_candidates", 0),
+        "fused": trace.get("fused_candidates", 0),
+        "postfiltered": trace.get("postfiltered_count", 0),
+    }
+    vector_cites = trace.get("vector_top_citations", [])[:3]
+    final_cites = trace.get("final_top_citations", [])[:3]
+
+    print("\nRetrieval trace:")
+    print(f"  where: {where}")
+    print(f"  counts: vector={counts['vector']} fused={counts['fused']} postfiltered={counts['postfiltered']}")
+    if vector_cites:
+        print("  top vector candidates:")
+        for c in vector_cites:
+            print(f"    - {c}")
+    else:
+        print("  top vector candidates: (none)")
+    if docs:
+        if final_cites:
+            print("  top evidence citations:")
+            for c in final_cites:
+                print(f"    - {c}")
+    else:
+        print("  top evidence citations: (none)")

@@ -33,11 +33,12 @@ class TableExtractor:
             logger.info("Camelot not installed; skip table extraction.")
             return []
 
-        try:
-            tables = camelot.read_pdf(str(pdf_path), pages="all", flavor=self.flavor)
-        except Exception as e:
-            logger.warning("Camelot failed on %s: %s", pdf_path, e)
-            return []
+        if self.flavor == "auto":
+            tables = self._read_with_fallback(camelot, pdf_path)
+        else:
+            tables = self._read_single(camelot, pdf_path, self.flavor)
+            if tables is None:
+                return []
 
         docs: List[Document] = []
         for i, t in enumerate(tables):
@@ -57,3 +58,17 @@ class TableExtractor:
 
         logger.info("Extracted %d tables from %s", len(docs), pdf_path)
         return docs
+
+    def _read_single(self, camelot: object, pdf_path: Path, flavor: str):
+        try:
+            return camelot.read_pdf(str(pdf_path), pages="all", flavor=flavor)
+        except Exception as e:
+            logger.warning("Camelot failed on %s with flavor=%s: %s", pdf_path, flavor, e)
+            return None
+
+    def _read_with_fallback(self, camelot: object, pdf_path: Path):
+        tables = self._read_single(camelot, pdf_path, "lattice")
+        if tables and len(tables) > 0:
+            return tables
+        tables = self._read_single(camelot, pdf_path, "stream")
+        return tables or []

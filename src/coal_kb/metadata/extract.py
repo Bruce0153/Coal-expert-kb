@@ -8,6 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from ..llm.factory import LLMConfig, make_chat_llm
 from ..schema.units import atm_to_mpa, bar_to_mpa, c_to_k
 from .evidence import FieldEvidence, clip_span
 from .normalize import Ontology, detect_targets, normalize_gas_agents, normalize_stage
@@ -254,7 +257,8 @@ def _extract_ratios(text: str) -> Tuple[Optional[Dict[str, float]], List[FieldEv
 class MetadataExtractor:
     onto: Ontology
     enable_llm: bool = False
-    llm_provider: str = "none"  # "openai"
+    llm_provider: str = "none"  # "openai"/"dashscope"/"openai_compatible"
+    llm_config: Optional[LLMConfig] = None
 
     def extract(self, doc: Document) -> Dict[str, Any]:
         text = doc.page_content or ""
@@ -332,7 +336,7 @@ class MetadataExtractor:
         meta["meta_evidence"] = evid
 
         # Optional LLM augmentation (merge conservatively)
-        if self.enable_llm and self.llm_provider == "openai":
+        if self.enable_llm and self.llm_provider != "none":
             meta = self._augment_with_openai(text=text, meta=meta)
 
         return meta
@@ -346,18 +350,15 @@ class MetadataExtractor:
           - if field missing from rule-extraction, accept LLM value.
           - keep rule evidence/conf as primary.
         """
-        try:
-            from langchain_openai import ChatOpenAI  # type: ignore
-            from langchain_core.messages import SystemMessage, HumanMessage
-        except Exception as e:
-            logger.warning("langchain-openai not installed; skip LLM augmentation. %s", e)
-            return meta
-
         prompt_path = "configs/prompts/metadata_extract.txt"
         with open(prompt_path, "r", encoding="utf-8") as f:
             sys_prompt = f.read().strip()
 
-        model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        if self.llm_config is None:
+            logger.warning("LLM config missing; skip LLM augmentation.")
+            return meta
+
+        model = make_chat_llm(self.llm_config)
         msgs = [
             SystemMessage(content=sys_prompt),
             HumanMessage(

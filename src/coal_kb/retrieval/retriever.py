@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.documents import Document
 
 from .bm25 import bm25_rank, rrf_fuse
+from .rerank import CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +73,18 @@ class ExpertRetriever:
     vector_retriever_factory: Any  # e.g. ChromaStore.as_retriever
     k: int = 6
     k_candidates: int = 40
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = 20
 
     def retrieve(self, query: str, parsed_filter: Dict[str, Any]) -> List[Document]:
         where = self._build_where_minimal(parsed_filter)
         vec_retriever = self.vector_retriever_factory(k=self.k_candidates, where=where)
 
-        vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        if hasattr(vec_retriever, "get_relevant_documents"):
+            vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        else:
+            vector_docs = vec_retriever.invoke(query)
 
         if not vector_docs:
             return []
@@ -87,9 +94,18 @@ class ExpertRetriever:
         fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
 
         # Step 1: OR-first post-filtering
-        out = self._post_filter_and_rank(fused_docs, parsed_filter)
+        filtered = self._post_filter_and_rank(fused_docs, parsed_filter)
 
-        return out[: self.k]
+        if self.rerank_enabled and filtered:
+            top_k = min(self.rerank_top_k, len(filtered))
+            reranker = CrossEncoderReranker(model_name=self.rerank_model)
+            reranked = reranker.rerank(query, filtered[:top_k], top_k=top_k)
+
+            reranked_keys = {_doc_key(d) for d in reranked}
+            remainder = [d for d in filtered[top_k:] if _doc_key(d) not in reranked_keys]
+            filtered = reranked + remainder
+
+        return filtered[: self.k]
 
     def _build_where_minimal(self, f: Dict[str, Any]) -> Dict[str, Any]:
         """

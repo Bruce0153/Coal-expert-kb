@@ -46,10 +46,18 @@ class ChromaStore:
     def vectorstore(self) -> Chroma:
         return self._vs
 
-    def add_documents(self, docs: List[Document]) -> None:
+    def add_documents(self, docs: List[Document], *, ids: Optional[List[str]] = None) -> None:
         if not docs:
             return
-        self._vs.add_documents(docs)
+        if ids is not None:
+            self._vs.add_documents(docs, ids=ids)
+        else:
+            self._vs.add_documents(docs)
+
+    def delete_where(self, where: Dict[str, Any]) -> None:
+        if not where:
+            return
+        self._vs.delete(where=where)
 
     def as_retriever(self, *, k: int = 5, where: Optional[Dict[str, Any]] = None):
         """

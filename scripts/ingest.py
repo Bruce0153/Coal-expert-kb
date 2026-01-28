@@ -19,6 +19,16 @@ def main() -> None:
         action="store_true",
         help="Enable LLM metadata augmentation (LLM is configured in configs/app.yaml).",
     )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Rebuild the KB (clear vectorstore + manifest) before ingest.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Proceed even if manifest signatures mismatch (not recommended).",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -30,7 +40,7 @@ def main() -> None:
         table_flavor=args.table_flavor,
         enable_llm_metadata=args.llm_metadata,
     )
-    stats = pipe.run()
+    stats = pipe.run(rebuild=args.rebuild, force=args.force)
     print(stats)
 
 

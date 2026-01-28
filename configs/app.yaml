@@ -4,6 +4,7 @@ paths:
   artifacts_dir: "data/artifacts"
   chroma_dir: "storage/chroma_db"
   sqlite_path: "storage/expert.db"
+  manifest_path: "storage/manifest.json"
 
 embedding:
   model_name: "BAAI/bge-m3"

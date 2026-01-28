@@ -48,6 +48,10 @@ def main() -> None:
     if args.llm and llm_provider == "none":
         llm_provider = cfg.llm.provider
 
+    llm_provider = args.llm_provider
+    if args.llm and llm_provider == "none":
+        llm_provider = cfg.llm.provider
+
     pipe = RecordPipeline(cfg=cfg, enable_llm_records=args.llm, llm_provider=llm_provider)
     stats = pipe.run(docs)
     print(stats)

@@ -16,6 +16,7 @@ class PathsConfig(BaseModel):
     artifacts_dir: str = "data/artifacts"
     chroma_dir: str = "storage/chroma_db"
     sqlite_path: str = "storage/expert.db"
+    manifest_path: str = "storage/manifest.json"
 
 
 # Local embedding (fallback): e.g., HuggingFace bge-m3

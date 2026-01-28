@@ -156,6 +156,18 @@ mkdir -p storage/chroma_db
 python scripts/ingest.py
 ```
 
+If the manifest detects an embeddings/chunking/schema mismatch, you will be prompted to rebuild:
+
+```bash
+python scripts/ingest.py --rebuild
+```
+
+To force ingestion without rebuilding (not recommended):
+
+```bash
+python scripts/ingest.py --force
+```
+
 Optional: enable table extraction (Camelot):
 
 ```bash

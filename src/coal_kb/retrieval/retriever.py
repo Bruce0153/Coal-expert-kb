@@ -77,7 +77,10 @@ class ExpertRetriever:
         where = self._build_where_minimal(parsed_filter)
         vec_retriever = self.vector_retriever_factory(k=self.k_candidates, where=where)
 
-        vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
+        if hasattr(vec_retriever, "invoke"):
+            vector_docs: List[Document] = vec_retriever.invoke(query)  # type: ignore[assignment]
+        else:
+            vector_docs = vec_retriever.get_relevant_documents(query)
 
         if not vector_docs:
             return []
@@ -159,3 +162,4 @@ class ExpertRetriever:
         )
 
         return [d for d, *_ in kept]
+

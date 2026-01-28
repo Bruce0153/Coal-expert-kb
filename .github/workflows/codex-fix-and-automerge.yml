@@ -1,0 +1,99 @@
+name: Codex Fix + Commit + Enable Auto-merge
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  codex_fix:
+    # 仅在 PR 评论、且包含指令时触发
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/codex fix')
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load PR info
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number
+            });
+            core.setOutput("number", pr.data.number);
+            core.setOutput("head_ref", pr.data.head.ref);
+            core.setOutput("head_repo", pr.data.head.repo.full_name);
+            core.setOutput("base_repo", pr.data.base.repo.full_name);
+
+      # 安全门：只允许同仓库分支（避免 fork PR 被写入/提权）
+      - name: Guard - only same-repo branches
+        if: steps.pr.outputs.head_repo != steps.pr.outputs.base_repo
+        run: |
+          echo "Refusing to write commits to fork PR for safety."
+          exit 1
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+
+      - name: Run Codex to implement fixes
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/fix.md
+          safety-strategy: drop-sudo
+          sandbox: workspace-write
+
+      - name: Commit & push changes (if any)
+        run: |
+          git status --porcelain
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "codex-bot"
+          git config user.email "codex-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Codex: automated fixes"
+          git push
+
+      - name: Enable auto-merge on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // Enable auto-merge via GraphQL
+            const prNumber = context.payload.issue.number;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            const query = `
+              mutation($pullRequestId:ID!, $mergeMethod:PullRequestMergeMethod!) {
+                enablePullRequestAutoMerge(input:{pullRequestId:$pullRequestId, mergeMethod:$mergeMethod}) {
+                  pullRequest { number }
+                }
+              }`;
+
+            await github.graphql(query, {
+              pullRequestId: pr.node_id,
+              mergeMethod: "SQUASH"
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: "✅ Codex applied fixes (if any) and enabled auto-merge (squash). It will merge after required checks/reviews pass."
+            });

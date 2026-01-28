@@ -52,6 +52,11 @@ def main() -> None:
         args.tables,
         args.llm_metadata,
     )
+    logger.info(
+        "Backend | mode=%s registry_db=%s",
+        cfg.backend,
+        cfg.registry.sqlite_path,
+    )
 
     start = time.monotonic()
     pipe = IngestPipeline(

@@ -24,6 +24,21 @@ retrieval:
 logging:
   level: "INFO"
 
+backend: "chroma"
+
+registry:
+  sqlite_path: "storage/kb.db"
+
+model_versions:
+  embedding_version: "v1"
+
+elastic:
+  host: "http://localhost:9200"
+  index_prefix: "coal_kb_chunks"
+  alias_current: "coal_kb_chunks_current"
+  alias_prev: "coal_kb_chunks_prev"
+  verify_certs: false
+
 llm:
   provider: dashscope
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"

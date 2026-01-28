@@ -43,6 +43,22 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+
+
 # DashScope / OpenAI-compatible Chat LLM config
 class LLMConfig(BaseModel):
     provider: str = "dashscope"
@@ -72,6 +88,10 @@ class AppConfig(BaseModel):
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    backend: str = "chroma"
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
+    model_versions: ModelVersionsConfig = Field(default_factory=ModelVersionsConfig)
+    elastic: ElasticConfig = Field(default_factory=ElasticConfig)
 
     # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -103,6 +123,7 @@ def _ensure_dirs(cfg: AppConfig) -> AppConfig:
     Path(cfg.paths.artifacts_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.chroma_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(cfg.registry.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
     return cfg
 
 

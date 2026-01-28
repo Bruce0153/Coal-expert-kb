@@ -112,6 +112,8 @@ PDFs (data/raw_pdfs/)
 Storage:
 - **Chroma** persistence: `storage/chroma_db/`
 - **SQLite** records DB: `storage/expert.db`
+- **SQLite** registry DB: `storage/kb.db` (documents/chunks/models/query logs)
+- **Elasticsearch** (optional): index data under Docker volume `elasticsearch_data`
 
 ---
 
@@ -132,6 +134,26 @@ If you plan to use **DashScope/Bailian** (recommended for LLM + embeddings):
 
 ```bash
 pip install -U langchain-openai openai python-dotenv
+```
+
+### 2.5) (Optional) Start Elasticsearch + Kibana
+
+For local development (no security):
+
+```bash
+docker compose up -d
+```
+
+Verify Elasticsearch:
+
+```bash
+curl -s http://localhost:9200 | jq .
+```
+
+Stop services:
+
+```bash
+docker compose down
 ```
 
 ### 3) Add PDFs
@@ -181,6 +203,14 @@ Optional: enable LLM metadata augmentation (**LLM is configured in app.yaml**):
 python scripts/ingest.py --llm-metadata
 ```
 
+### 5.1) Ingest into Elasticsearch (optional)
+
+Set `backend: elastic` (or `both`) in `configs/app.yaml`, then rebuild once:
+
+```bash
+python scripts/ingest.py --rebuild
+```
+
 ### 6) Ask questions (RAG)
 
 ```bash
@@ -196,6 +226,14 @@ Optional: LLM-grounded answer generation (still cites evidence):
 
 ```bash
 python scripts/ask.py --llm
+```
+
+### 6.1) Switch backend at query time
+
+```bash
+python scripts/ask.py --backend chroma
+python scripts/ask.py --backend elastic
+python scripts/ask.py --backend both
 ```
 
 ### 7) Extract structured records into SQLite
@@ -285,6 +323,10 @@ Sections you will typically edit:
 - `embedding` (**local fallback**): e.g., `BAAI/bge-m3`
 - `embeddings` (**remote**): DashScope/OpenAI-compatible embeddings
 - `llm`: DashScope/OpenAI-compatible chat model
+- `backend`: `chroma` | `elastic` | `both` (default: `chroma`)
+- `registry.sqlite_path`: registry DB path (defaults to `storage/kb.db`)
+- `model_versions.embedding_version`: index version label (e.g., `v1`)
+- `elastic`: Elasticsearch settings + aliases
 
 > **Important:** if you change embedding backend/model (e.g., from local to DashScope), you must **rebuild Chroma**:
 >
@@ -292,6 +334,12 @@ Sections you will typically edit:
 > rm -rf storage/chroma_db
 > python scripts/ingest.py
 > ```
+
+If you are using Elasticsearch, rebuild to create a fresh index for a new embedding version:
+
+```bash
+python scripts/index.py build --embedding-version v2
+```
 
 ### Local vs remote embeddings
 
@@ -312,6 +360,8 @@ Inputs: `data/raw_pdfs/*.pdf`
 Outputs:
 - Chroma DB: `storage/chroma_db/`
 - Enriched chunk metadata: stored as Chroma metadata
+- Registry DB: `storage/kb.db`
+- Elasticsearch index (optional): `coal_kb_chunks_*` + aliases
 
 Key options:
 - `--tables`: optional table extraction
@@ -323,6 +373,31 @@ Outputs: evidence list (and optional LLM answer)
 
 Key options:
 - `--llm`: enable LLM answer generation (reads `cfg.llm`)
+- `--backend`: `chroma` | `elastic` | `both`
+
+### Index versioning (`scripts/index.py`)
+Manage Elasticsearch index versions and aliases.
+
+Examples:
+
+```bash
+# Build a new index + ingest (elastic backend)
+python scripts/index.py build --embedding-version v2
+
+# Switch alias_current to a specific index
+python scripts/index.py switch --index coal_kb_chunks__embv2__schemaXXXX__202401011230
+
+# Roll back alias_current to alias_prev
+python scripts/index.py rollback
+```
+
+### Inspect Elasticsearch chunks
+
+```bash
+curl -s "http://localhost:9200/coal_kb_chunks_current/_search?q=source_file:*.pdf&size=2" | jq .
+```
+
+You can also use Kibana → Discover (index pattern: `coal_kb_chunks_*`).
 
 ### Extract records (`scripts/extract_records.py`)
 Inputs: chunks (from Chroma)  

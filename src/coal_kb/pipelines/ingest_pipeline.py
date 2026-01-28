@@ -6,12 +6,12 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from tqdm import tqdm
 from ..llm.factory import LLMConfig
-from coal_kb.embeddings.factory import EmbeddingsConfig
+from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.splitter import split_page_docs
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
@@ -19,7 +19,9 @@ from ..parsing.pdf_loader import load_pdf_pages
 from ..parsing.table_extractor import TableExtractor
 from ..settings import AppConfig
 from ..store.chroma_store import ChromaStore
+from ..store.elastic_store import ElasticStore
 from ..store.manifest import Manifest, ManifestEntry
+from ..store.registry_sqlite import RegistrySQLite
 from ..utils.file_hash import sha256_file
 from ..utils.hash import stable_chunk_id
 
@@ -115,7 +117,13 @@ class IngestPipeline:
     enable_llm_metadata: bool = False
     llm_provider: str = "none"  # "openai"
 
-    def run(self, *, rebuild: bool = False, force: bool = False) -> dict:
+    def run(
+        self,
+        *,
+        rebuild: bool = False,
+        force: bool = False,
+        elastic_index_override: Optional[str] = None,
+    ) -> dict:
         overall_start = time.monotonic()
         raw_dir = Path(self.cfg.paths.raw_pdfs_dir)
         interim_dir = Path(self.cfg.paths.interim_dir)
@@ -142,13 +150,30 @@ class IngestPipeline:
                 manifest_path.unlink()
             logger.info("Rebuild requested; cleared vectorstore and manifest.")
 
-        # Vectorstore
-        store = ChromaStore(
-            persist_dir=self.cfg.paths.chroma_dir,
-            collection_name=self.cfg.chroma.collection_name,
-            embeddings_cfg=EmbeddingsConfig(**self.cfg.embeddings.model_dump()),
-            embedding_model=self.cfg.embedding.model_name,  # fallback：本地 bge-m3
-        )
+        backend = self.cfg.backend
+        if backend not in {"chroma", "elastic", "both"}:
+            raise ValueError(f"Unsupported backend: {backend}")
+
+        registry = RegistrySQLite(self.cfg.registry.sqlite_path)
+
+        store: Optional[ChromaStore] = None
+        if backend in {"chroma", "both"}:
+            store = ChromaStore(
+                persist_dir=self.cfg.paths.chroma_dir,
+                collection_name=self.cfg.chroma.collection_name,
+                embeddings_cfg=EmbeddingsConfig(**self.cfg.embeddings.model_dump()),
+                embedding_model=self.cfg.embedding.model_name,  # fallback：本地 bge-m3
+            )
+
+        elastic_store: Optional[ElasticStore] = None
+        elastic_index: Optional[str] = None
+        embeddings = None
+        if backend in {"elastic", "both"}:
+            elastic_store = ElasticStore(
+                host=self.cfg.elastic.host,
+                verify_certs=self.cfg.elastic.verify_certs,
+            )
+            embeddings = make_embeddings(EmbeddingsConfig(**self.cfg.embeddings.model_dump()))
 
         stage_start = time.monotonic()
         manifest = Manifest.load(manifest_path)
@@ -173,6 +198,39 @@ class IngestPipeline:
         manifest.chunking_signature = chunk_sig
         manifest.schema_signature = schema_sig
 
+        embedding_version = self.cfg.model_versions.embedding_version
+        embedding_dim = self.cfg.embeddings.dimensions or 0
+        if embeddings is not None and not embedding_dim:
+            embedding_dim = len(embeddings.embed_query("dimension probe"))
+        registry.log_model(
+            embedding_model=self.cfg.embeddings.model,
+            embedding_dim=embedding_dim,
+            embedding_version=embedding_version,
+        )
+        if elastic_store and embeddings is not None:
+            dims = embedding_dim or len(embeddings.embed_query("dimension probe"))
+            if elastic_index_override:
+                elastic_index = elastic_index_override
+                elastic_store.create_index(elastic_index, dims)
+            else:
+                current = elastic_store.resolve_current_index(self.cfg.elastic.alias_current)
+                if rebuild or not current:
+                    schema_hash = schema_sig[:8]
+                    index_name = elastic_store.build_index_name(
+                        index_prefix=self.cfg.elastic.index_prefix,
+                        embedding_version=embedding_version,
+                        schema_hash=schema_hash,
+                    )
+                    elastic_store.create_index(index_name, dims)
+                    elastic_store.switch_alias(
+                        alias_current=self.cfg.elastic.alias_current,
+                        alias_prev=self.cfg.elastic.alias_prev,
+                        new_index=index_name,
+                    )
+                    elastic_index = index_name
+                else:
+                    elastic_index = self.cfg.elastic.alias_current
+
         current_files = {str(p.resolve()): p for p in sorted(raw_dir.rglob("*.pdf"))}
         logger.info(
             "Stage: manifest_load_scan | pdfs=%d | elapsed=%.2fs",
@@ -184,12 +242,28 @@ class IngestPipeline:
             logger.info("Stage: removed_files | count=%d", len(removed))
         for path in removed:
             logger.info("Removed file; deleting entries: %s", path)
-            store.delete_where({"source_file": path})
+            entry = manifest.files.get(path)
+            document_id = entry.sha256 if entry else stable_chunk_id(path)
+            if store:
+                store.delete_where({"source_file": path})
+            if elastic_store and elastic_index:
+                elastic_store.delete_by_document_id(elastic_index, document_id)
+            registry.delete_chunks_by_document_id(document_id)
+            if entry:
+                registry.upsert_document(
+                    document_id=document_id,
+                    source_file=path,
+                    sha256=entry.sha256,
+                    mtime=entry.mtime_ns,
+                    size=entry.size,
+                    status="removed",
+                )
             manifest.files.pop(path, None)
 
         # Load PDFs (page-level)
         page_docs: List[Document] = []
         changed_files: Dict[str, ManifestEntry] = {}
+        changed_old_doc_ids: Dict[str, str] = {}
         skipped_unchanged = 0
         skipped_same_hash = 0
         cache_hits = 0
@@ -214,6 +288,14 @@ class IngestPipeline:
                 )
                 skipped_same_hash += 1
                 logger.info("File metadata updated only (hash unchanged): %s", path_str)
+                registry.upsert_document(
+                    document_id=file_hash,
+                    source_file=path_str,
+                    sha256=file_hash,
+                    mtime=stat.st_mtime_ns,
+                    size=stat.st_size,
+                    status="active",
+                )
                 continue
 
             changed_files[path_str] = ManifestEntry(
@@ -222,6 +304,8 @@ class IngestPipeline:
                 size=stat.st_size,
                 sha256=file_hash,
             )
+            if entry:
+                changed_old_doc_ids[path_str] = entry.sha256
 
             cache_path = _cache_path_for_pdf(interim_dir, str(pdf_path))
             cached = _load_pages_cache(cache_path)
@@ -285,6 +369,10 @@ class IngestPipeline:
                 "elapsed_s": round(time.monotonic() - overall_start, 2),
             }
 
+        document_id_by_source = {
+            path_str: entry.sha256 for path_str, entry in changed_files.items()
+        }
+
         # Page-level metadata extraction
         stage_start = time.monotonic()
         pages_with_stage = 0
@@ -335,6 +423,8 @@ class IngestPipeline:
         )
 
         indexed_docs: Dict[str, Document] = {}
+        registry_chunks: List[Dict[str, Any]] = []
+        es_docs: List[Dict[str, Any]] = []
         stage_start = time.monotonic()
         chunks_with_gas_flags = 0
         chunks_with_target_flags = 0
@@ -346,6 +436,7 @@ class IngestPipeline:
             section = str((ch.metadata or {}).get("section", "unknown"))
 
             chunk_id = stable_chunk_id(src, page, section, ch.page_content[:200])
+            document_id = document_id_by_source.get(str(src), stable_chunk_id(str(src)))
             meta: Dict[str, object] = dict(ch.metadata or {})
 
             chunk_meta = extractor.extract(Document(page_content=ch.page_content, metadata={}))
@@ -381,7 +472,7 @@ class IngestPipeline:
             meta.setdefault("source_file", src)
 
             meta = _trim_metadata(meta)
-            meta = _stringify_metadata(meta)
+            meta_for_registry = _stringify_metadata(meta)
 
             has_gas_flags = any(k.startswith("gas_") and meta.get(k) is True for k in meta)
             has_target_flags = any(k.startswith("has_") and meta.get(k) is True for k in meta)
@@ -393,65 +484,163 @@ class IngestPipeline:
                 chunks_with_any_flags += 1
 
             # store the chunk text
-            indexed_docs[chunk_id] = Document(page_content=ch.page_content, metadata=meta)
+            if store:
+                indexed_docs[chunk_id] = Document(page_content=ch.page_content, metadata=meta_for_registry)
+
+            registry_chunks.append(
+                {
+                    "chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "page": ch.metadata.get("page"),
+                    "section": ch.metadata.get("section"),
+                    "chunk_index": i,
+                    "text": ch.page_content,
+                    "metadata_json": json.dumps(meta_for_registry, ensure_ascii=False),
+                    "embedding_model": self.cfg.embeddings.model,
+                    "embedding_dim": int(embedding_dim),
+                    "embedding_version": embedding_version,
+                }
+            )
+
+            if elastic_store and elastic_index:
+                es_doc = {
+                    "chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "source_file": meta.get("source_file"),
+                    "page": ch.metadata.get("page"),
+                    "page_label": ch.metadata.get("page_label"),
+                    "section": ch.metadata.get("section"),
+                    "chunk_index": i,
+                    "text": ch.page_content,
+                    "stage": meta.get("stage"),
+                    "gas_agent": meta.get("gas_agent"),
+                    "targets": meta.get("targets"),
+                    "T_K": meta.get("T_K"),
+                    "T_min_K": meta.get("T_min_K"),
+                    "T_max_K": meta.get("T_max_K"),
+                    "P_MPa": meta.get("P_MPa"),
+                    "P_min_MPa": meta.get("P_min_MPa"),
+                    "P_max_MPa": meta.get("P_max_MPa"),
+                    "coal_name": meta.get("coal_name"),
+                    "metadata_json": json.dumps(meta_for_registry, ensure_ascii=False),
+                }
+                for key, value in meta.items():
+                    if key.startswith("gas_") or key.startswith("has_"):
+                        es_doc[key] = value
+                es_docs.append(es_doc)
 
         logger.info(
             "Stage: chunk_enrichment | chunks=%d gas_flags=%d target_flags=%d any_flags=%d | elapsed=%.2fs",
-            len(indexed_docs),
+            len(chunks),
             chunks_with_gas_flags,
             chunks_with_target_flags,
             chunks_with_any_flags,
             time.monotonic() - stage_start,
         )
 
+        for path_str, entry in changed_files.items():
+            registry.upsert_document(
+                document_id=entry.sha256,
+                source_file=path_str,
+                sha256=entry.sha256,
+                mtime=entry.mtime_ns,
+                size=entry.size,
+                status="active",
+            )
+        registry.upsert_chunks_bulk(registry_chunks)
+
         for path_str in changed_files.keys():
-            store.delete_where({"source_file": path_str})
+            if store:
+                store.delete_where({"source_file": path_str})
+            old_doc_id = changed_old_doc_ids.get(path_str)
+            if old_doc_id:
+                if elastic_store and elastic_index:
+                    elastic_store.delete_by_document_id(elastic_index, old_doc_id)
+                registry.delete_chunks_by_document_id(old_doc_id)
             logger.info("File changed; deleted entries: %s", path_str)
 
         docs_to_add = list(indexed_docs.values())
-        stage_start = time.monotonic()
-        batch_size = 128
-        ids = list(indexed_docs.keys())
-        for start in range(0, len(docs_to_add), batch_size):
-            batch_docs = docs_to_add[start : start + batch_size]
-            batch_ids = ids[start : start + batch_size]
-            try:
-                store.add_documents(batch_docs, ids=batch_ids)
-            except Exception as e:
-                batch_sources = {d.metadata.get("source_file") for d in batch_docs}
-                pages = [d.metadata.get("page") for d in batch_docs if isinstance(d.metadata.get("page"), int)]
-                page_range = f"{min(pages)}-{max(pages)}" if pages else "unknown"
-                logger.error(
-                    "Embedding/upsert failed | batch=%d-%d sources=%s pages=%s error=%s",
-                    start,
-                    start + len(batch_docs) - 1,
-                    sorted(s for s in batch_sources if s),
-                    page_range,
-                    e,
-                )
-                if force:
-                    logger.warning("Force enabled; continuing after batch failure.")
-                    continue
-                raise
-        logger.info(
-            "Stage: vectorstore_write | docs_to_add=%d batch_size=%d | elapsed=%.2fs",
-            len(docs_to_add),
-            batch_size,
-            time.monotonic() - stage_start,
-        )
+        if store:
+            stage_start = time.monotonic()
+            batch_size = 128
+            ids = list(indexed_docs.keys())
+            for start in range(0, len(docs_to_add), batch_size):
+                batch_docs = docs_to_add[start : start + batch_size]
+                batch_ids = ids[start : start + batch_size]
+                try:
+                    store.add_documents(batch_docs, ids=batch_ids)
+                except Exception as e:
+                    batch_sources = {d.metadata.get("source_file") for d in batch_docs}
+                    pages = [d.metadata.get("page") for d in batch_docs if isinstance(d.metadata.get("page"), int)]
+                    page_range = f"{min(pages)}-{max(pages)}" if pages else "unknown"
+                    logger.error(
+                        "Embedding/upsert failed | batch=%d-%d sources=%s pages=%s error=%s",
+                        start,
+                        start + len(batch_docs) - 1,
+                        sorted(s for s in batch_sources if s),
+                        page_range,
+                        e,
+                    )
+                    if force:
+                        logger.warning("Force enabled; continuing after batch failure.")
+                        continue
+                    raise
+            logger.info(
+                "Stage: vectorstore_write | docs_to_add=%d batch_size=%d | elapsed=%.2fs",
+                len(docs_to_add),
+                batch_size,
+                time.monotonic() - stage_start,
+            )
+
+        if elastic_store and elastic_index and embeddings is not None:
+            stage_start = time.monotonic()
+            batch_size = 64
+            for start in range(0, len(es_docs), batch_size):
+                batch_docs = es_docs[start : start + batch_size]
+                texts = [d["text"] for d in batch_docs]
+                try:
+                    vectors = embeddings.embed_documents(texts)
+                except Exception as e:
+                    logger.error(
+                        "Embedding failed | batch=%d-%d error=%s",
+                        start,
+                        start + len(batch_docs) - 1,
+                        e,
+                    )
+                    if force:
+                        logger.warning("Force enabled; continuing after embedding failure.")
+                        continue
+                    raise
+                for doc, vec in zip(batch_docs, vectors):
+                    doc["embedding"] = vec
+                elastic_store.bulk_upsert_chunks(elastic_index, batch_docs)
+            logger.info(
+                "Stage: elastic_write | docs_to_add=%d batch_size=%d | elapsed=%.2fs",
+                len(es_docs),
+                batch_size,
+                time.monotonic() - stage_start,
+            )
 
         for path_str, entry in changed_files.items():
-            entry.chunk_count = sum(1 for d in docs_to_add if d.metadata.get("source_file") == path_str)
+            if store:
+                entry.chunk_count = sum(
+                    1 for d in docs_to_add if d.metadata.get("source_file") == path_str
+                )
+            else:
+                entry.chunk_count = sum(
+                    1 for d in es_docs if d.get("source_file") == path_str
+                )
             manifest.files[path_str] = entry
 
         stage_start = time.monotonic()
         manifest.save(manifest_path)
         logger.info("Stage: manifest_save | elapsed=%.2fs", time.monotonic() - stage_start)
+        indexed_count = len(docs_to_add) if store else len(es_docs)
         logger.info(
             "Ingest complete: page_docs=%d chunks=%d indexed=%d elapsed=%.2fs",
             len(page_docs),
             len(chunks),
-            len(docs_to_add),
+            indexed_count,
             time.monotonic() - overall_start,
         )
 
@@ -462,7 +651,7 @@ class IngestPipeline:
             "pages_parsed": parsed_pages,
             "docs": len(page_docs),
             "chunks": len(chunks),
-            "indexed": len(docs_to_add),
+            "indexed": indexed_count,
             "skipped": skipped_unchanged + skipped_same_hash,
             "elapsed_s": round(time.monotonic() - overall_start, 2),
         }

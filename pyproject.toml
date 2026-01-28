@@ -29,6 +29,7 @@ dependencies = [
   "chromadb>=0.5",
   "pypdf>=4.0",
   "sentence-transformers>=2.6",
+  "elasticsearch>=8.12",
 ]
 
 [project.optional-dependencies]

@@ -28,6 +28,8 @@ This repository is designed for two end goals:
 - [Structured records (SQLite)](#structured-records-sqlite)
 - [LoRA/QLoRA fine-tuning (shortest path)](#loraqlora-fine-tuning-shortest-path)
 - [Project structure](#project-structure)
+- [Code walkthrough](#code-walkthrough)
+- [Runbook (end-to-end)](#runbook-end-to-end)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
@@ -425,6 +427,105 @@ coal-expert-kb/
 ```
 
 ---
+
+## Code walkthrough
+
+This is a high-level map of how the code fits together, with the key inputs/outputs for each module.
+
+### Core pipeline flow
+
+1) **Parsing & cleaning** → `coal_kb/parsing/`
+   - `pdf_loader.py`: loads PDFs into page-level `Document`s and strips common header/footer noise.
+   - `table_extractor.py`: optional Camelot-based table extraction (yields table docs).
+
+2) **Chunking** → `coal_kb/chunking/`
+   - `splitter.py`: splits pages into chunks, preserves metadata.
+   - `sectioner.py`: heuristically tags sections (methods/results/…).
+
+3) **Metadata extraction** → `coal_kb/metadata/`
+   - `extract.py`: rule-first extraction of T/P ranges, ratios, coal names, etc.
+   - `normalize.py`: ontology-based normalization for stage/gas/targets.
+   - `evidence.py`: evidence spans + confidence for auditing.
+
+4) **Vectorstore & retrieval** → `coal_kb/store/` + `coal_kb/retrieval/`
+   - `chroma_store.py`: wraps Chroma and embeddings.
+   - `filter_parser.py`: parses query filters (stage/gas/T/P/targets).
+   - `retriever.py`: hybrid retrieval (vector + BM25 + RRF + post-filters).
+
+5) **QA & records** → `coal_kb/qa/` + `coal_kb/pipelines/record_pipeline.py`
+   - `rag_answer.py`: evidence-only output or LLM-based answer w/ citations.
+   - `record_pipeline.py`: LLM extraction → normalize → conflict check → SQLite.
+
+6) **Config & schema** → `coal_kb/settings.py` + `coal_kb/schema/`
+   - Central config loading, schema models, validators, and unit conversions.
+
+---
+
+## Runbook (end-to-end)
+
+This is a concrete, repeatable run sequence. Adjust paths and API keys as needed.
+
+### 0) Install
+
+```bash
+pip install -e .[dev]
+```
+
+If you plan to use remote LLM/embeddings (DashScope/OpenAI-compatible):
+
+```bash
+pip install -U langchain-openai openai python-dotenv
+```
+
+### 1) Configure
+
+Edit `configs/app.yaml`:
+- `paths` → data/storage locations
+- `llm` → DashScope/OpenAI-compatible chat model
+- `embeddings` → remote embedding model
+
+Create `.env`:
+
+```env
+DASHSCOPE_API_KEY=sk-xxxx
+```
+
+### 2) Ingest PDFs
+
+```bash
+python scripts/ingest.py
+```
+
+Optional table extraction:
+
+```bash
+python scripts/ingest.py --tables --table-flavor lattice
+```
+
+### 3) Ask questions
+
+```bash
+python scripts/ask.py
+```
+
+LLM-enabled answers:
+
+```bash
+python scripts/ask.py --llm
+```
+
+### 4) Extract structured records
+
+```bash
+python scripts/extract_records.py --llm --limit 300
+```
+
+### 5) Export for modeling
+
+```bash
+python scripts/export_records.py --out data/artifacts/records.csv
+```
+
 
 ## Testing
 

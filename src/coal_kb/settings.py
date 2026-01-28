@@ -16,6 +16,7 @@ class PathsConfig(BaseModel):
     artifacts_dir: str = "data/artifacts"
     chroma_dir: str = "storage/chroma_db"
     sqlite_path: str = "storage/expert.db"
+    manifest_path: str = "storage/manifest.json"
 
 
 # Local embedding (fallback): e.g., HuggingFace bge-m3
@@ -32,8 +33,30 @@ class ChromaConfig(BaseModel):
     collection_name: str = "coal_gasification_papers"
 
 
+class RetrievalConfig(BaseModel):
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = 20
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
 
 
 # DashScope / OpenAI-compatible Chat LLM config
@@ -63,7 +86,12 @@ class AppConfig(BaseModel):
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    backend: str = "chroma"
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
+    model_versions: ModelVersionsConfig = Field(default_factory=ModelVersionsConfig)
+    elastic: ElasticConfig = Field(default_factory=ElasticConfig)
 
     # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -95,6 +123,7 @@ def _ensure_dirs(cfg: AppConfig) -> AppConfig:
     Path(cfg.paths.artifacts_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.chroma_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(cfg.registry.sqlite_path).parent.mkdir(parents=True, exist_ok=True)
     return cfg
 
 

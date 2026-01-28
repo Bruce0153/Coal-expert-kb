@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_pdf_pages(pdf_path: Path) -> List[Document]:
+    logger.info("Parsing PDF: %s", pdf_path)
     loader = PyPDFLoader(str(pdf_path))
     docs = loader.load()
 
@@ -50,8 +51,10 @@ def load_pdf_pages(pdf_path: Path) -> List[Document]:
             if not new_text:
                 continue
             out.append(Document(page_content=new_text, metadata=d.metadata))
+        logger.info("Parsed PDF: %s | pages=%d", pdf_path, len(out))
         return out
 
+    logger.info("Parsed PDF: %s | pages=%d", pdf_path, len(cleaned_pages))
     return cleaned_pages
 
 

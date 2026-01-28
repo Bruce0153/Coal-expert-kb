@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest PDFs into Chroma expert KB.")
     parser.add_argument("--tables", action="store_true", help="Enable optional table extraction (Camelot).")
-    parser.add_argument("--table-flavor", default="lattice", choices=["lattice", "stream"])
+    parser.add_argument("--table-flavor", default="lattice", choices=["lattice", "stream", "auto"])
     parser.add_argument(
         "--llm-metadata",
         action="store_true",

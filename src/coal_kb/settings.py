@@ -33,6 +33,12 @@ class ChromaConfig(BaseModel):
     collection_name: str = "coal_gasification_papers"
 
 
+class RetrievalConfig(BaseModel):
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: int = 20
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -64,6 +70,7 @@ class AppConfig(BaseModel):
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)

@@ -16,6 +16,11 @@ chunking:
 chroma:
   collection_name: "coal_gasification_papers"
 
+retrieval:
+  rerank_enabled: false
+  rerank_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  rerank_top_k: 20
+
 logging:
   level: "INFO"
 

@@ -20,6 +20,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ask the expert KB with metadata-aware retrieval.")
     parser.add_argument("--k", type=int, default=6)
     parser.add_argument("--llm", action="store_true", help="Enable LLM answer generation.")
+    parser.add_argument("--rerank", action="store_true", help="Enable cross-encoder reranking.")
+    parser.add_argument(
+        "--rerank-model",
+        default=None,
+        help="Cross-encoder model name (overrides config).",
+    )
+    parser.add_argument(
+        "--rerank-top-k",
+        type=int,
+        default=None,
+        help="How many candidates to rerank (overrides config).",
+    )
     parser.add_argument(
         "--llm-provider",
         default="none",
@@ -40,7 +52,17 @@ def main() -> None:
         embedding_model=cfg.embedding.model_name,
     )
 
-    expert = ExpertRetriever(vector_retriever_factory=store.as_retriever, k=args.k)
+    rerank_enabled = args.rerank or cfg.retrieval.rerank_enabled
+    rerank_model = args.rerank_model or cfg.retrieval.rerank_model
+    rerank_top_k = args.rerank_top_k or cfg.retrieval.rerank_top_k
+
+    expert = ExpertRetriever(
+        vector_retriever_factory=store.as_retriever,
+        k=args.k,
+        rerank_enabled=rerank_enabled,
+        rerank_model=rerank_model,
+        rerank_top_k=rerank_top_k,
+    )
     llm_provider = args.llm_provider
     if args.llm and llm_provider == "none":
         llm_provider = cfg.llm.provider

@@ -152,6 +152,8 @@ def main() -> None:
             client=elastic_store.client,
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            candidates=cfg.retrieval.candidates,
+            rrf_k=cfg.retrieval.rrf_k,
         )
 
     expert = ExpertRetriever(

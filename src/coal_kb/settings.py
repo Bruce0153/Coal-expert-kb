@@ -50,6 +50,7 @@ class ChromaConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     k: int = 5
     candidates: int = 50
+    rrf_k: int = 60
     max_per_source: int = 2
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
@@ -63,6 +64,41 @@ class RetrievalConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     level: str = "INFO"
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+    timeout_s: int = 60
+    bulk_chunk_size: int = 200
+
+
+class IngestionConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_reference_like_unknown: bool = True
+
+
+class QueryRewriteConfig(BaseModel):
+    enable_llm: bool = False
+
+
+class TenancyConfig(BaseModel):
+    enabled: bool = False
+    default_tenant_id: str = "default"
+    enforce_tenant_filter: bool = True
 
 
 class RegistryConfig(BaseModel):
@@ -229,7 +265,7 @@ def load_config() -> AppConfig:
             f"Set COAL_KB_CONFIG or create configs/app.yaml."
         )
 
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    raw = _load_yaml_unique_keys(config_path)
     cfg = AppConfig.model_validate(raw)
 
     # Apply env overrides (keep minimal)
@@ -249,3 +285,28 @@ def load_config() -> AppConfig:
         cfg.embeddings.model = env.emb_model
 
     return _ensure_dirs(cfg)
+
+
+def _load_yaml_unique_keys(path: Path) -> dict:
+    class UniqueKeyLoader(yaml.SafeLoader):
+        pass
+
+    def construct_mapping(loader: yaml.SafeLoader, node: yaml.Node, deep: bool = False) -> dict:
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise ValueError(f"Duplicate key in YAML: {key}")
+            value = loader.construct_object(value_node, deep=deep)
+            mapping[key] = value
+        return mapping
+
+    UniqueKeyLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+        construct_mapping,
+    )
+
+    try:
+        return yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader) or {}
+    except ValueError as exc:
+        raise ValueError(f"Invalid config {path}: {exc}") from exc

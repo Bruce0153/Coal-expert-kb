@@ -265,11 +265,17 @@ curl -s "http://localhost:9200/_cat/aliases?v"
 # 5) Ask questions
 python scripts/ask.py --backend elastic
 
-# 6) Build new version (v2) and rollback if needed
+# 6) Validate index health
+python scripts/validate_index.py --index coal_kb_chunks_current
+
+# 7) Evaluate retrieval + log metrics
+python scripts/eval.py --gold data/eval/eval_set.jsonl
+
+# 8) Build new version (v2) and rollback if needed
 python scripts/index.py build --embedding-version v2
 python scripts/index.py rollback
 
-# 7) Evaluate retrieval
+# 9) Evaluate retrieval (ad-hoc metrics)
 python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
 ```
 

@@ -90,10 +90,28 @@ class IngestionRunModel(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     embedding_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    embedding_dim: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     schema_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     chunking_signature: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     stats_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
+class RunMetricsModel(Base):
+    __tablename__ = "run_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    index_name: Mapped[str] = mapped_column(Text)
+    embedding_version: Mapped[str] = mapped_column(String(64))
+    schema_hash: Mapped[str] = mapped_column(String(64))
+    doc_count: Mapped[int] = mapped_column(Integer)
+    chunks: Mapped[int] = mapped_column(Integer)
+    precision_at_k: Mapped[Optional[float]] = mapped_column(nullable=True)
+    recall_at_k: Mapped[Optional[float]] = mapped_column(nullable=True)
+    mrr: Mapped[Optional[float]] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 @dataclass
@@ -123,6 +141,8 @@ class RegistrySQLite:
         self._ensure_column("query_logs", "rerank_enabled", "rerank_enabled INTEGER")
         self._ensure_column("query_logs", "backend", "backend VARCHAR(32)")
         self._ensure_column("documents", "title", "title TEXT")
+        self._ensure_column("ingestion_runs", "embedding_model", "embedding_model VARCHAR(128)")
+        self._ensure_column("ingestion_runs", "embedding_dim", "embedding_dim INTEGER")
 
     def upsert_document(
         self,
@@ -210,6 +230,8 @@ class RegistrySQLite:
         *,
         run_id: str,
         embedding_version: str,
+        embedding_model: str,
+        embedding_dim: int,
         schema_hash: str,
         chunking_signature: str,
     ) -> None:
@@ -218,6 +240,8 @@ class RegistrySQLite:
                 run_id=run_id,
                 started_at=datetime.utcnow(),
                 embedding_version=embedding_version,
+                embedding_model=embedding_model,
+                embedding_dim=embedding_dim,
                 schema_hash=schema_hash,
                 chunking_signature=chunking_signature,
                 status="running",
@@ -285,6 +309,35 @@ class RegistrySQLite:
                 rerank_enabled=1 if rerank_enabled else 0 if rerank_enabled is not None else None,
                 tenant_id=tenant_id,
                 embedding_version=embedding_version,
+                created_at=datetime.utcnow(),
+            )
+            sess.add(obj)
+            sess.commit()
+
+    def log_run_metrics(
+        self,
+        *,
+        run_id: str,
+        index_name: str,
+        embedding_version: str,
+        schema_hash: str,
+        doc_count: int,
+        chunks: int,
+        precision_at_k: Optional[float],
+        recall_at_k: Optional[float],
+        mrr: Optional[float],
+    ) -> None:
+        with Session(self._engine) as sess:
+            obj = RunMetricsModel(
+                run_id=run_id,
+                index_name=index_name,
+                embedding_version=embedding_version,
+                schema_hash=schema_hash,
+                doc_count=doc_count,
+                chunks=chunks,
+                precision_at_k=precision_at_k,
+                recall_at_k=recall_at_k,
+                mrr=mrr,
                 created_at=datetime.utcnow(),
             )
             sess.add(obj)

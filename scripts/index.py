@@ -10,6 +10,7 @@ from coal_kb.logging import setup_logging
 from coal_kb.pipelines.ingest_pipeline import IngestPipeline
 from coal_kb.settings import load_config
 from coal_kb.store.elastic_store import ElasticStore
+from coal_kb.store.elastic_validation import validate_index
 from coal_kb.utils.hash import stable_chunk_id
 
 logger = logging.getLogger(__name__)
@@ -69,20 +70,34 @@ def main() -> None:
             schema_hash=schema_hash,
         )
         elastic_store.create_index(index_name, dims)
+        pipe = IngestPipeline(cfg=cfg)
+        with progress_status("Building index"):
+            stats = pipe.run(rebuild=True, elastic_index_override=index_name)
+        logger.info("Stage: validate_index | index=%s", index_name)
+        validation = validate_index(
+            client=elastic_store.client,
+            index_or_alias=index_name,
+            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            expected_dims=dims,
+            query_text="validation probe",
+        )
+        if not validation["ok"]:
+            logger.error("Index validation failed. Alias not switched.")
+            for err in validation["errors"]:
+                logger.error("Validation error: %s", err)
+            raise SystemExit(1)
         elastic_store.switch_alias(
             alias_current=cfg.elastic.alias_current,
             alias_prev=cfg.elastic.alias_prev,
             new_index=index_name,
         )
-        pipe = IngestPipeline(cfg=cfg)
-        with progress_status("Building index"):
-            stats = pipe.run(rebuild=True, elastic_index_override=index_name)
         print_stats_table(
             "Build Summary",
             [
                 ("index", index_name),
                 ("indexed", str(stats.get("indexed"))),
                 ("chunks", str(stats.get("chunks"))),
+                ("validated", str(validation.get("ok"))),
                 ("elapsed_s", str(stats.get("elapsed_s"))),
             ],
         )

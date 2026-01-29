@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
+from coal_kb.retrieval.bm25 import rrf_fuse
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ class ElasticRetriever:
     index: str
     embeddings_cfg: EmbeddingsConfig
     k: int = 6
+    candidates: int = 50
+    rrf_k: int = 60
     tenant_id: Optional[str] = None
     where: Optional[Dict[str, Any]] = None
 
@@ -26,25 +29,40 @@ class ElasticRetriever:
     def invoke(self, query: str) -> List[Document]:
         query_vec = self._embeddings.embed_query(query)
         filters = self._build_filters()
+        top_n = max(self.candidates, self.k)
 
-        body = {
-            "size": self.k,
+        bm25_body = {
+            "size": top_n,
             "query": {
                 "bool": {
                     "filter": filters,
-                    "should": [{"match": {"text": query}}],
+                    "must": [{"match": {"text": {"query": query}}}],
                 }
             },
+        }
+        bm25_rsp = self.client.search(index=self.index, body=bm25_body)
+        bm25_hits = bm25_rsp.get("hits", {}).get("hits", [])
+        bm25_docs = [self._hit_to_doc(hit) for hit in bm25_hits]
+
+        knn_body = {
+            "size": top_n,
             "knn": {
                 "field": "embedding",
                 "query_vector": query_vec,
-                "k": self.k,
-                "num_candidates": max(self.k * 4, 20),
+                "k": top_n,
+                "num_candidates": max(top_n * 4, 20),
+                "filter": filters,
             },
         }
-        rsp = self.client.search(index=self.index, body=body)
-        hits = rsp.get("hits", {}).get("hits", [])
-        return [self._hit_to_doc(hit) for hit in hits]
+        knn_rsp = self.client.search(index=self.index, body=knn_body)
+        knn_hits = knn_rsp.get("hits", {}).get("hits", [])
+        knn_docs = [self._hit_to_doc(hit) for hit in knn_hits]
+
+        if not bm25_docs and not knn_docs:
+            return []
+
+        fused = rrf_fuse(bm25_docs, knn_docs, k=self.rrf_k)
+        return fused[: self.k]
 
     def _build_filters(self) -> List[Dict[str, Any]]:
         filters: List[Dict[str, Any]] = []
@@ -133,6 +151,8 @@ def make_elastic_retriever_factory(
     client: Any,
     index: str,
     embeddings_cfg: EmbeddingsConfig,
+    candidates: int = 50,
+    rrf_k: int = 60,
     tenant_id: Optional[str] = None,
 ):
     def factory(k: int, where: Optional[Dict[str, Any]] = None):
@@ -141,6 +161,8 @@ def make_elastic_retriever_factory(
             index=index,
             embeddings_cfg=embeddings_cfg,
             k=k,
+            candidates=candidates,
+            rrf_k=rrf_k,
             tenant_id=tenant_id,
             where=where,
         )

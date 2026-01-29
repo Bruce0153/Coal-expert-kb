@@ -47,4 +47,16 @@ def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
         rerank_enabled=True,
     )
 
+    registry.log_run_metrics(
+        run_id="run1",
+        index_name="idx",
+        embedding_version="v1",
+        schema_hash="abc12345",
+        doc_count=10,
+        chunks=10,
+        precision_at_k=0.5,
+        recall_at_k=1.0,
+        mrr=0.8,
+    )
+
     registry.delete_chunks_by_document_id("doc1")

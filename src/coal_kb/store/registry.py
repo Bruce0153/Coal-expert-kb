@@ -26,6 +26,8 @@ class Registry(Protocol):
         *,
         run_id: str,
         embedding_version: str,
+        embedding_model: str,
+        embedding_dim: int,
         schema_hash: str,
         chunking_signature: str,
     ) -> None: ...
@@ -44,4 +46,18 @@ class Registry(Protocol):
         rerank_enabled: Optional[bool],
         tenant_id: Optional[str],
         embedding_version: Optional[str],
+    ) -> None: ...
+
+    def log_run_metrics(
+        self,
+        *,
+        run_id: str,
+        index_name: str,
+        embedding_version: str,
+        schema_hash: str,
+        doc_count: int,
+        chunks: int,
+        precision_at_k: Optional[float],
+        recall_at_k: Optional[float],
+        mrr: Optional[float],
     ) -> None: ...

@@ -201,20 +201,24 @@ class IngestPipeline:
         manifest.embeddings_signature = embed_sig
         manifest.chunking_signature = chunk_sig
         manifest.schema_signature = schema_sig
+        embedding_version = self.cfg.model_versions.embedding_version
+        embedding_model = self.cfg.embeddings.model
+        embedding_dim = self.cfg.embeddings.dimensions or 0
+        if not embedding_dim:
+            if embeddings is None:
+                embeddings = make_embeddings(EmbeddingsConfig(**self.cfg.embeddings.model_dump()))
+            embedding_dim = len(embeddings.embed_query("dimension probe"))
         run_id = stable_chunk_id(str(datetime.utcnow().isoformat()))
         registry.start_run(
             run_id=run_id,
             embedding_version=embedding_version,
+            embedding_model=embedding_model,
+            embedding_dim=embedding_dim,
             schema_hash=schema_sig[:8],
             chunking_signature=chunk_sig,
         )
-
-        embedding_version = self.cfg.model_versions.embedding_version
-        embedding_dim = self.cfg.embeddings.dimensions or 0
-        if embeddings is not None and not embedding_dim:
-            embedding_dim = len(embeddings.embed_query("dimension probe"))
         registry.log_model(
-            embedding_model=self.cfg.embeddings.model,
+            embedding_model=embedding_model,
             embedding_dim=embedding_dim,
             embedding_version=embedding_version,
         )
@@ -371,6 +375,8 @@ class IngestPipeline:
         if not page_docs:
             manifest.save(manifest_path)
             stats = {
+                "run_id": run_id,
+                "embedding_version": embedding_version,
                 "pdfs_scanned": len(current_files),
                 "pdfs_changed": len(changed_files),
                 "pdfs_removed": len(removed),
@@ -694,6 +700,8 @@ class IngestPipeline:
         )
 
         stats = {
+            "run_id": run_id,
+            "embedding_version": embedding_version,
             "pdfs_scanned": len(current_files),
             "pdfs_changed": len(changed_files),
             "pdfs_removed": len(removed),

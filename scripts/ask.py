@@ -13,6 +13,7 @@ from coal_kb.metadata.normalize import Ontology
 from coal_kb.qa.rag_answer import RAGAnswerer
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
+from coal_kb.retrieval.bm25 import rrf_fuse
 from coal_kb.retrieval.retriever import ExpertRetriever
 from coal_kb.retrieval.query_rewrite import rewrite_query
 from coal_kb.settings import load_config
@@ -85,11 +86,15 @@ def main() -> None:
             client=elastic_store.client,
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            candidates=cfg.retrieval.candidates,
+            rrf_k=cfg.retrieval.rrf_k,
             tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
         )
 
     if backend == "both":
-        vector_factory = _combine_factories(chroma_factory, elastic_factory)
+        vector_factory = _combine_factories(
+            chroma_factory, elastic_factory, rrf_k=cfg.retrieval.rrf_k
+        )
     elif backend == "elastic":
         vector_factory = elastic_factory
     else:
@@ -214,35 +219,33 @@ def _print_trace(trace: dict, docs: list) -> None:
         print("  top evidence citations: (none)")
 
 
-def _combine_factories(chroma_factory, elastic_factory):
+def _combine_factories(chroma_factory, elastic_factory, *, rrf_k: int = 60):
     def factory(k: int, where=None):
         chroma = chroma_factory(k=k, where=where) if chroma_factory else None
         elastic = elastic_factory(k=k, where=where) if elastic_factory else None
-        return _CombinedRetriever(chroma=chroma, elastic=elastic)
+        return _CombinedRetriever(chroma=chroma, elastic=elastic, k=k, rrf_k=rrf_k)
 
     return factory
 
 
 class _CombinedRetriever:
-    def __init__(self, chroma, elastic):
+    def __init__(self, chroma, elastic, k: int, rrf_k: int = 60):
         self._chroma = chroma
         self._elastic = elastic
+        self._k = k
+        self._rrf_k = rrf_k
 
     def invoke(self, query: str):
-        docs = []
+        chroma_docs = []
+        elastic_docs = []
         if self._chroma is not None:
             if hasattr(self._chroma, "get_relevant_documents"):
-                docs.extend(self._chroma.get_relevant_documents(query))
+                chroma_docs = self._chroma.get_relevant_documents(query)
             else:
-                docs.extend(self._chroma.invoke(query))
+                chroma_docs = self._chroma.invoke(query)
         if self._elastic is not None:
-            docs.extend(self._elastic.invoke(query))
-        seen = set()
-        unique = []
-        for d in docs:
-            key = d.metadata.get("chunk_id")
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(d)
-        return unique
+            elastic_docs = self._elastic.invoke(query)
+        if not chroma_docs and not elastic_docs:
+            return []
+        fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
+        return fused[: self._k]

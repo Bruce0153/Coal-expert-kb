@@ -51,14 +51,6 @@ retrieval:
 logging:
   level: "INFO"
 
-backend: "elastic"
-
-registry:
-  sqlite_path: "storage/kb.db"
-
-model_versions:
-  embedding_version: "v1"
-
 elastic:
   host: "http://localhost:9200"
   index_prefix: "coal_kb_chunks"
@@ -84,22 +76,13 @@ tenancy:
   default_tenant_id: "default"
   enforce_tenant_filter: true
 
-backend: "elastic"
-
 registry:
   sqlite_path: "storage/kb.db"
 
+backend: "elastic"
+
 model_versions:
   embedding_version: "v1"
-
-elastic:
-  host: "http://localhost:9200"
-  index_prefix: "coal_kb_chunks"
-  alias_current: "coal_kb_chunks_current"
-  alias_prev: "coal_kb_chunks_prev"
-  verify_certs: false
-  timeout_s: 60
-  bulk_chunk_size: 200
 
 ingestion:
   drop_sections:
@@ -116,21 +99,6 @@ tenancy:
   enabled: false
   default_tenant_id: "default"
   enforce_tenant_filter: true
-
-backend: "chroma"
-
-registry:
-  sqlite_path: "storage/kb.db"
-
-model_versions:
-  embedding_version: "v1"
-
-elastic:
-  host: "http://localhost:9200"
-  index_prefix: "coal_kb_chunks"
-  alias_current: "coal_kb_chunks_current"
-  alias_prev: "coal_kb_chunks_prev"
-  verify_certs: false
 
 ingest_clean:
   drop_sections:
@@ -142,21 +110,6 @@ ingest_clean:
 
 query_rewrite:
   enable_llm: false
-
-backend: "chroma"
-
-registry:
-  sqlite_path: "storage/kb.db"
-
-model_versions:
-  embedding_version: "v1"
-
-elastic:
-  host: "http://localhost:9200"
-  index_prefix: "coal_kb_chunks"
-  alias_current: "coal_kb_chunks_current"
-  alias_prev: "coal_kb_chunks_prev"
-  verify_certs: false
 
 llm:
   provider: dashscope

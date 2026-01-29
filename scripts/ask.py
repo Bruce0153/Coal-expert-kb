@@ -131,15 +131,14 @@ def main() -> None:
         use_fuse=(backend != "elastic"),
         where_full=(backend == "elastic"),
     )
-    llm_provider = args.llm_provider
-    if args.llm and llm_provider == "none":
-        llm_provider = cfg.llm.provider
+    provider = args.llm_provider
+    if provider == "none":
+        provider = cfg.llm.provider
 
-    provider = llm_provider if llm_provider != "none" else cfg.llm.provider
     llm_cfg = LLMConfig(**{**cfg.llm.model_dump(), "provider": provider})
+
     answerer = RAGAnswerer(
         enable_llm=args.llm,
-        llm_provider=llm_provider,
         llm_config=llm_cfg,
     )
 
@@ -177,13 +176,13 @@ def main() -> None:
             top_source_files=[d.metadata.get("source_file") for d in docs],
             latency_ms=round(latency_ms, 2),
             backend=backend,
-            tenant_id=None,
+            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else "default",
             embedding_version=cfg.model_versions.embedding_version,
             rerank_enabled=expert.rerank_enabled,
         )
+
         ans = answerer.answer(q, docs)
         print("\n" + ans)
-
 
 def _print_trace(trace: dict, docs: list) -> None:
     if not trace:

@@ -66,13 +66,14 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
-class RegistryConfig(BaseModel):
-    sqlite_path: str = "storage/kb.db"
-
+class IngestionConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_reference_like_unknown: bool = True
 
 class ModelVersionsConfig(BaseModel):
     embedding_version: str = "v1"
-
 
 class ElasticConfig(BaseModel):
     host: str = "http://localhost:9200"
@@ -83,100 +84,22 @@ class ElasticConfig(BaseModel):
     timeout_s: int = 60
     bulk_chunk_size: int = 200
 
-
-class IngestionConfig(BaseModel):
-    drop_sections: list[str] = Field(
-        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
-    )
-    drop_reference_like_unknown: bool = True
-
-
 class QueryRewriteConfig(BaseModel):
     enable_llm: bool = False
-
 
 class TenancyConfig(BaseModel):
     enabled: bool = False
     default_tenant_id: str = "default"
     enforce_tenant_filter: bool = True
 
-
 class RegistryConfig(BaseModel):
     sqlite_path: str = "storage/kb.db"
-
-
-class ModelVersionsConfig(BaseModel):
-    embedding_version: str = "v1"
-
-
-class ElasticConfig(BaseModel):
-    host: str = "http://localhost:9200"
-    index_prefix: str = "coal_kb_chunks"
-    alias_current: str = "coal_kb_chunks_current"
-    alias_prev: str = "coal_kb_chunks_prev"
-    verify_certs: bool = False
-    timeout_s: int = 60
-    bulk_chunk_size: int = 200
-
-
-class IngestionConfig(BaseModel):
-    drop_sections: list[str] = Field(
-        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
-    )
-    drop_reference_like_unknown: bool = True
-
-
-class QueryRewriteConfig(BaseModel):
-    enable_llm: bool = False
-
-
-class TenancyConfig(BaseModel):
-    enabled: bool = False
-    default_tenant_id: str = "default"
-    enforce_tenant_filter: bool = True
-
-
-class RegistryConfig(BaseModel):
-    sqlite_path: str = "storage/kb.db"
-
-
-class ModelVersionsConfig(BaseModel):
-    embedding_version: str = "v1"
-
-
-class ElasticConfig(BaseModel):
-    host: str = "http://localhost:9200"
-    index_prefix: str = "coal_kb_chunks"
-    alias_current: str = "coal_kb_chunks_current"
-    alias_prev: str = "coal_kb_chunks_prev"
-    verify_certs: bool = False
-
 
 class IngestCleanConfig(BaseModel):
     drop_sections: list[str] = Field(
         default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
     )
     drop_unknown_reference_like: bool = True
-
-
-class QueryRewriteConfig(BaseModel):
-    enable_llm: bool = False
-
-
-class RegistryConfig(BaseModel):
-    sqlite_path: str = "storage/kb.db"
-
-
-class ModelVersionsConfig(BaseModel):
-    embedding_version: str = "v1"
-
-
-class ElasticConfig(BaseModel):
-    host: str = "http://localhost:9200"
-    index_prefix: str = "coal_kb_chunks"
-    alias_current: str = "coal_kb_chunks_current"
-    alias_prev: str = "coal_kb_chunks_prev"
-    verify_certs: bool = False
 
 
 # DashScope / OpenAI-compatible Chat LLM config

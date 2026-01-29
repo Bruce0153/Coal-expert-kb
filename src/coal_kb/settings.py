@@ -100,6 +100,49 @@ class TenancyConfig(BaseModel):
     enforce_tenant_filter: bool = True
 
 
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+
+
+class IngestCleanConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_unknown_reference_like: bool = True
+
+
+class QueryRewriteConfig(BaseModel):
+    enable_llm: bool = False
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+
+
 # DashScope / OpenAI-compatible Chat LLM config
 class LLMConfig(BaseModel):
     provider: str = "dashscope"

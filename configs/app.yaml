@@ -83,6 +83,47 @@ tenancy:
   default_tenant_id: "default"
   enforce_tenant_filter: true
 
+backend: "chroma"
+
+registry:
+  sqlite_path: "storage/kb.db"
+
+model_versions:
+  embedding_version: "v1"
+
+elastic:
+  host: "http://localhost:9200"
+  index_prefix: "coal_kb_chunks"
+  alias_current: "coal_kb_chunks_current"
+  alias_prev: "coal_kb_chunks_prev"
+  verify_certs: false
+
+ingest_clean:
+  drop_sections:
+    - references
+    - acknowledgements
+    - contents
+    - appendix
+  drop_unknown_reference_like: true
+
+query_rewrite:
+  enable_llm: false
+
+backend: "chroma"
+
+registry:
+  sqlite_path: "storage/kb.db"
+
+model_versions:
+  embedding_version: "v1"
+
+elastic:
+  host: "http://localhost:9200"
+  index_prefix: "coal_kb_chunks"
+  alias_current: "coal_kb_chunks_current"
+  alias_prev: "coal_kb_chunks_prev"
+  verify_certs: false
+
 llm:
   provider: dashscope
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"

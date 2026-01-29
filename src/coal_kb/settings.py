@@ -48,12 +48,13 @@ class ChromaConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
-    rerank_enabled: bool = False
-    rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_top_k: int = 20
-    rerank_candidates: int = 50
-    rerank_device: str = "auto"
+    k: int = 5
+    candidates: int = 50
     max_per_source: int = 2
+    rerank_enabled: bool = True
+    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_top_n: int = 50
+    rerank_device: str = "auto"
     drop_sections: list[str] = Field(
         default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
     )
@@ -62,6 +63,41 @@ class RetrievalConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     level: str = "INFO"
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+    timeout_s: int = 60
+    bulk_chunk_size: int = 200
+
+
+class IngestionConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_reference_like_unknown: bool = True
+
+
+class QueryRewriteConfig(BaseModel):
+    enable_llm: bool = False
+
+
+class TenancyConfig(BaseModel):
+    enabled: bool = False
+    default_tenant_id: str = "default"
+    enforce_tenant_filter: bool = True
 
 
 class RegistryConfig(BaseModel):
@@ -136,12 +172,13 @@ class AppConfig(BaseModel):
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    backend: str = "chroma"
+    backend: str = "elastic"
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
     model_versions: ModelVersionsConfig = Field(default_factory=ModelVersionsConfig)
     elastic: ElasticConfig = Field(default_factory=ElasticConfig)
-    ingest_clean: IngestCleanConfig = Field(default_factory=IngestCleanConfig)
+    ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     query_rewrite: QueryRewriteConfig = Field(default_factory=QueryRewriteConfig)
+    tenancy: TenancyConfig = Field(default_factory=TenancyConfig)
 
     # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)
     llm: LLMConfig = Field(default_factory=LLMConfig)

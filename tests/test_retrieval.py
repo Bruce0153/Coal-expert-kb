@@ -167,7 +167,7 @@ def test_rerank_optional_fallback(monkeypatch):
             k=3,
             k_candidates=10,
             rerank_enabled=True,
-            rerank_top_k=2,
+            rerank_top_n=2,
         )
         rerank_docs = reranked.retrieve(query, parsed)
 

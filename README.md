@@ -156,6 +156,12 @@ Stop services:
 docker compose down
 ```
 
+Remove data volumes:
+
+```bash
+docker compose down -v
+```
+
 ### 3) Add PDFs
 Put PDFs under:
 
@@ -170,11 +176,9 @@ You can use:
 
 See [Configuration guide](#configuration-guide).
 
-### 5) Ingest into Chroma
+### 5) Ingest into Elasticsearch (default)
 
 ```bash
-rm -rf storage/chroma_db
-mkdir -p storage/chroma_db
 python scripts/ingest.py
 ```
 
@@ -206,11 +210,12 @@ python scripts/ingest.py --llm-metadata
 By default, low-value sections (references/acknowledgements/appendix/contents) are **not** indexed.
 This keeps reference lists out of retrieval results.
 
-### 5.1) Ingest into Elasticsearch (optional)
+### 5.1) Ingest into Chroma (fallback)
 
-Set `backend: elastic` (or `both`) in `configs/app.yaml`, then rebuild once:
+Set `backend: chroma` in `configs/app.yaml`, then rebuild:
 
 ```bash
+rm -rf storage/chroma_db
 python scripts/ingest.py --rebuild
 ```
 
@@ -239,6 +244,33 @@ Mechanism-style queries are automatically expanded with academic terms (rule-bas
 python scripts/ask.py --backend chroma
 python scripts/ask.py --backend elastic
 python scripts/ask.py --backend both
+```
+
+### 6.2) Elastic-first workflow (recommended)
+
+```bash
+# 1) Start Elastic + Kibana
+docker compose up -d
+
+# 2) Set API key for embeddings
+export DASHSCOPE_API_KEY=sk-xxxxxxxx
+
+# 3) Build index (v1)
+python scripts/index.py build --embedding-version v1
+
+# 4) Inspect indices & aliases
+curl -s "http://localhost:9200/_cat/indices?v"
+curl -s "http://localhost:9200/_cat/aliases?v"
+
+# 5) Ask questions
+python scripts/ask.py --backend elastic
+
+# 6) Build new version (v2) and rollback if needed
+python scripts/index.py build --embedding-version v2
+python scripts/index.py rollback
+
+# 7) Evaluate retrieval
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
 ```
 
 ### 7) Extract structured records into SQLite
@@ -329,13 +361,14 @@ Sections you will typically edit:
 - `embedding` (**local fallback**): e.g., `BAAI/bge-m3`
 - `embeddings` (**remote**): DashScope/OpenAI-compatible embeddings
 - `llm`: DashScope/OpenAI-compatible chat model
-- `backend`: `chroma` | `elastic` | `both` (default: `chroma`)
+- `backend`: `elastic` | `chroma` | `both` (default: `elastic`)
 - `registry.sqlite_path`: registry DB path (defaults to `storage/kb.db`)
 - `model_versions.embedding_version`: index version label (e.g., `v1`)
 - `elastic`: Elasticsearch settings + aliases
-- `ingest_clean`: drop low-value sections during ingest
+- `ingestion`: drop low-value sections during ingest
 - `retrieval`: reranker, diversity (max_per_source), and reference filtering
 - `query_rewrite`: lightweight query expansion (optional LLM)
+- `tenancy`: multi-tenant defaults and enforcement
 
 > **Important:** if you change embedding backend/model (e.g., from local to DashScope), you must **rebuild Chroma**:
 >

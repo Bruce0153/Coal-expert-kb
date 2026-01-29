@@ -12,12 +12,17 @@ logger = logging.getLogger(__name__)
 class ElasticStore:
     host: str
     verify_certs: bool = False
+    timeout_s: int = 60
 
     def __post_init__(self) -> None:
         from elasticsearch import Elasticsearch, helpers
 
         self._helpers = helpers
-        self._client = Elasticsearch(self.host, verify_certs=self.verify_certs)
+        self._client = Elasticsearch(
+            self.host,
+            verify_certs=self.verify_certs,
+            request_timeout=self.timeout_s,
+        )
 
     @property
     def client(self) -> Any:
@@ -33,6 +38,7 @@ class ElasticStore:
         body = {
             "settings": {"index": {"number_of_shards": 1, "number_of_replicas": 0}},
             "mappings": {
+                "dynamic": True,
                 "properties": {
                     "text": {"type": "text"},
                     "embedding": {"type": "dense_vector", "dims": dims, "index": True, "similarity": "cosine"},

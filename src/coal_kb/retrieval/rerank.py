@@ -75,7 +75,11 @@ class CrossEncoderReranker:
             logger.warning("sentence-transformers CrossEncoder unavailable: %s", e)
             return list(docs)[:top_k]
 
-        model = CrossEncoder(self.model_name)
+        try:
+            model = CrossEncoder(self.model_name, local_files_only=True)
+        except Exception as e:
+            logger.warning("CrossEncoder local model unavailable: %s", e)
+            return list(docs)[:top_k]
         pairs = [(query, d.page_content) for d in docs]
         scores = model.predict(pairs)
         ranked = sorted(zip(docs, scores), key=lambda x: float(x[1]), reverse=True)

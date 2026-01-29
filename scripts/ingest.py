@@ -5,6 +5,7 @@ import logging
 import time
 
 from coal_kb.logging import setup_logging
+from coal_kb.cli_ui import print_banner, print_kv, print_stats_table, progress_status
 from coal_kb.pipelines.ingest_pipeline import IngestPipeline
 from coal_kb.settings import load_config
 
@@ -34,6 +35,19 @@ def main() -> None:
 
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
+    print_banner("Coal KB Ingest", f"backend={cfg.backend}")
+    print_kv(
+        "Config",
+        {
+            "raw_dir": cfg.paths.raw_pdfs_dir,
+            "chroma_dir": cfg.paths.chroma_dir,
+            "registry_db": cfg.registry.sqlite_path,
+            "embedding_model": cfg.embeddings.model,
+            "chunk_size": str(cfg.chunking.chunk_size),
+            "chunk_overlap": str(cfg.chunking.chunk_overlap),
+            "drop_sections": ",".join(cfg.ingestion.drop_sections),
+        },
+    )
     logger.info(
         "Ingest config | raw_dir=%s chroma_dir=%s interim_dir=%s",
         cfg.paths.raw_pdfs_dir,
@@ -65,7 +79,8 @@ def main() -> None:
         table_flavor=args.table_flavor,
         enable_llm_metadata=args.llm_metadata,
     )
-    stats = pipe.run(rebuild=args.rebuild, force=args.force)
+    with progress_status("Ingesting PDFs"):
+        stats = pipe.run(rebuild=args.rebuild, force=args.force)
     elapsed = stats.get("elapsed_s", round(time.monotonic() - start, 2))
     logger.info(
         "Ingest summary | scanned=%s changed=%s removed=%s pages=%s chunks=%s indexed=%s dropped=%s elapsed=%.2fs",
@@ -77,6 +92,18 @@ def main() -> None:
         stats.get("indexed"),
         stats.get("dropped_chunks"),
         elapsed,
+    )
+    print_stats_table(
+        "Ingest Summary",
+        [
+            ("pdfs_scanned", str(stats.get("pdfs_scanned"))),
+            ("pdfs_changed", str(stats.get("pdfs_changed"))),
+            ("pages_parsed", str(stats.get("pages_parsed"))),
+            ("chunks", str(stats.get("chunks"))),
+            ("indexed", str(stats.get("indexed"))),
+            ("dropped_chunks", str(stats.get("dropped_chunks"))),
+            ("elapsed_s", str(elapsed)),
+        ],
     )
     print(stats)
 

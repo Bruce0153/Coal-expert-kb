@@ -41,6 +41,7 @@ def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
         top_chunk_ids=["c1"],
         top_source_files=["a.pdf"],
         latency_ms=12.3,
+        backend="chroma",
         tenant_id=None,
         embedding_version="v1",
         rerank_enabled=True,

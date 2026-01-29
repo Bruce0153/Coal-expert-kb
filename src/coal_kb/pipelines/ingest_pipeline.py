@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +24,7 @@ from ..store.chroma_store import ChromaStore
 from ..store.elastic_store import ElasticStore
 from ..store.manifest import Manifest, ManifestEntry
 from ..store.registry_sqlite import RegistrySQLite
+from ..store.registry import Registry
 from ..utils.file_hash import sha256_file
 from ..utils.hash import stable_chunk_id
 
@@ -155,7 +157,7 @@ class IngestPipeline:
         if backend not in {"chroma", "elastic", "both"}:
             raise ValueError(f"Unsupported backend: {backend}")
 
-        registry = RegistrySQLite(self.cfg.registry.sqlite_path)
+        registry: Registry = RegistrySQLite(self.cfg.registry.sqlite_path)
 
         store: Optional[ChromaStore] = None
         if backend in {"chroma", "both"}:
@@ -173,6 +175,7 @@ class IngestPipeline:
             elastic_store = ElasticStore(
                 host=self.cfg.elastic.host,
                 verify_certs=self.cfg.elastic.verify_certs,
+                timeout_s=self.cfg.elastic.timeout_s,
             )
             embeddings = make_embeddings(EmbeddingsConfig(**self.cfg.embeddings.model_dump()))
 
@@ -198,6 +201,13 @@ class IngestPipeline:
         manifest.embeddings_signature = embed_sig
         manifest.chunking_signature = chunk_sig
         manifest.schema_signature = schema_sig
+        run_id = stable_chunk_id(str(datetime.utcnow().isoformat()))
+        registry.start_run(
+            run_id=run_id,
+            embedding_version=embedding_version,
+            schema_hash=schema_sig[:8],
+            chunking_signature=chunk_sig,
+        )
 
         embedding_version = self.cfg.model_versions.embedding_version
         embedding_dim = self.cfg.embeddings.dimensions or 0
@@ -249,7 +259,7 @@ class IngestPipeline:
                 store.delete_where({"source_file": path})
             if elastic_store and elastic_index:
                 elastic_store.delete_by_document_id(elastic_index, document_id)
-            registry.delete_chunks_by_document_id(document_id)
+            registry.delete_by_document_id(document_id)
             if entry:
                 registry.upsert_document(
                     document_id=document_id,
@@ -258,6 +268,7 @@ class IngestPipeline:
                     mtime=entry.mtime_ns,
                     size=entry.size,
                     status="removed",
+                    tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
                 )
             manifest.files.pop(path, None)
 
@@ -296,6 +307,7 @@ class IngestPipeline:
                     mtime=stat.st_mtime_ns,
                     size=stat.st_size,
                     status="active",
+                    tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
                 )
                 continue
 
@@ -358,7 +370,7 @@ class IngestPipeline:
 
         if not page_docs:
             manifest.save(manifest_path)
-            return {
+            stats = {
                 "pdfs_scanned": len(current_files),
                 "pdfs_changed": len(changed_files),
                 "pdfs_removed": len(removed),
@@ -372,6 +384,8 @@ class IngestPipeline:
                 "dropped_reference_like": 0,
                 "elapsed_s": round(time.monotonic() - overall_start, 2),
             }
+            registry.finish_run(run_id=run_id, stats=stats, status="no_docs")
+            return stats
 
         document_id_by_source = {
             path_str: entry.sha256 for path_str, entry in changed_files.items()
@@ -430,8 +444,8 @@ class IngestPipeline:
             time.monotonic() - stage_start,
         )
 
-        drop_sections = {s.lower() for s in self.cfg.ingest_clean.drop_sections}
-        drop_unknown_ref_like = self.cfg.ingest_clean.drop_unknown_reference_like
+        drop_sections = {s.lower() for s in self.cfg.ingestion.drop_sections}
+        drop_unknown_ref_like = self.cfg.ingestion.drop_reference_like_unknown
         dropped_by_section: Dict[str, int] = {}
         dropped_reference_like = 0
         kept_chunks: List[Document] = []
@@ -539,6 +553,7 @@ class IngestPipeline:
                 es_doc = {
                     "chunk_id": chunk_id,
                     "document_id": document_id,
+                    "tenant_id": self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
                     "source_file": meta.get("source_file"),
                     "page": ch.metadata.get("page"),
                     "page_label": ch.metadata.get("page_label"),
@@ -579,6 +594,7 @@ class IngestPipeline:
                 mtime=entry.mtime_ns,
                 size=entry.size,
                 status="active",
+                tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
             )
         registry.upsert_chunks_bulk(registry_chunks)
 
@@ -589,7 +605,7 @@ class IngestPipeline:
             if old_doc_id:
                 if elastic_store and elastic_index:
                     elastic_store.delete_by_document_id(elastic_index, old_doc_id)
-                registry.delete_chunks_by_document_id(old_doc_id)
+                registry.delete_by_document_id(old_doc_id)
             logger.info("File changed; deleted entries: %s", path_str)
 
         docs_to_add = list(indexed_docs.values())
@@ -627,7 +643,7 @@ class IngestPipeline:
 
         if elastic_store and elastic_index and embeddings is not None:
             stage_start = time.monotonic()
-            batch_size = 64
+            batch_size = self.cfg.elastic.bulk_chunk_size
             for start in range(0, len(es_docs), batch_size):
                 batch_docs = es_docs[start : start + batch_size]
                 texts = [d["text"] for d in batch_docs]
@@ -677,7 +693,7 @@ class IngestPipeline:
             time.monotonic() - overall_start,
         )
 
-        return {
+        stats = {
             "pdfs_scanned": len(current_files),
             "pdfs_changed": len(changed_files),
             "pdfs_removed": len(removed),
@@ -691,3 +707,5 @@ class IngestPipeline:
             "dropped_reference_like": dropped_reference_like,
             "elapsed_s": round(time.monotonic() - overall_start, 2),
         }
+        registry.finish_run(run_id=run_id, stats=stats, status="success")
+        return stats

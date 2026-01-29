@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from coal_kb.chunking.sectioner import is_reference_like
+from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
 from coal_kb.retrieval.filter_parser import FilterParser
@@ -14,6 +15,8 @@ from coal_kb.retrieval.query_rewrite import rewrite_query
 from coal_kb.retrieval.retriever import ExpertRetriever
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
+from coal_kb.store.elastic_store import ElasticStore
+from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 
 
 @dataclass
@@ -121,27 +124,49 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config()
+    print_banner("Coal KB Retrieval Eval", f"backend={cfg.backend}")
     onto = Ontology.load("configs/schema.yaml")
     parser_ = FilterParser(onto=onto)
 
-    store = ChromaStore(
-        persist_dir=cfg.paths.chroma_dir,
-        collection_name=cfg.chroma.collection_name,
-        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-        embedding_model=cfg.embedding.model_name,
-    )
+    backend = cfg.backend
+    if backend not in {"elastic", "chroma", "both"}:
+        raise ValueError(f"Unsupported backend: {backend}")
+
+    vector_factory = None
+    if backend in {"chroma", "both"}:
+        store = ChromaStore(
+            persist_dir=cfg.paths.chroma_dir,
+            collection_name=cfg.chroma.collection_name,
+            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            embedding_model=cfg.embedding.model_name,
+        )
+        vector_factory = store.as_retriever
+
+    if backend in {"elastic", "both"}:
+        elastic_store = ElasticStore(
+            host=cfg.elastic.host,
+            verify_certs=cfg.elastic.verify_certs,
+            timeout_s=cfg.elastic.timeout_s,
+        )
+        vector_factory = make_elastic_retriever_factory(
+            client=elastic_store.client,
+            index=cfg.elastic.alias_current,
+            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+        )
 
     expert = ExpertRetriever(
-        vector_retriever_factory=store.as_retriever,
+        vector_retriever_factory=vector_factory,
         k=args.k,
         rerank_enabled=cfg.retrieval.rerank_enabled,
         rerank_model=cfg.retrieval.rerank_model,
-        rerank_top_k=cfg.retrieval.rerank_top_k,
-        rerank_candidates=cfg.retrieval.rerank_candidates,
+        rerank_top_n=cfg.retrieval.rerank_top_n,
+        rerank_candidates=cfg.retrieval.candidates,
         rerank_device=cfg.retrieval.rerank_device,
         max_per_source=cfg.retrieval.max_per_source,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
+        use_fuse=(backend != "elastic"),
+        where_full=(backend == "elastic"),
     )
 
     items = load_eval_set(Path(args.gold))
@@ -198,6 +223,7 @@ def main() -> None:
     print(sep)
     for row in rows:
         print(format_row(row))
+    print_stats_table("Summary", [(r[0], r[2]) for r in rows])
 
 
 if __name__ == "__main__":

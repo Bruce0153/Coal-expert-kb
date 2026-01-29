@@ -76,12 +76,14 @@ class ExpertRetriever:
     k_candidates: int = 40
     rerank_enabled: bool = False
     rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_top_k: int = 20
+    rerank_top_n: int = 50
     rerank_candidates: int = 50
     rerank_device: str = "auto"
     max_per_source: int = 2
     drop_sections: Optional[List[str]] = None
     drop_reference_like: bool = True
+    use_fuse: bool = True
+    where_full: bool = False
 
     def retrieve(
         self,
@@ -89,7 +91,7 @@ class ExpertRetriever:
         parsed_filter: Dict[str, Any],
         trace: Optional[Dict[str, Any]] = None,
     ) -> List[Document]:
-        where = self._build_where_minimal(parsed_filter)
+        where = self._build_where(parsed_filter)
         logger.info("Retrieval: vector search | where=%s k_candidates=%d", where, self.k_candidates)
         vec_retriever = self.vector_retriever_factory(k=self.k_candidates, where=where)
 
@@ -107,10 +109,13 @@ class ExpertRetriever:
             logger.info("Retrieval: no vector candidates.")
             return []
 
-        # Step 2: BM25 on candidate set + RRF fuse
-        logger.info("Retrieval: BM25+RRF fuse | candidates=%d", len(vector_docs))
-        bm25_ranked = [d for d, _s in bm25_rank(query, vector_docs)]
-        fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
+        if self.use_fuse:
+            # Step 2: BM25 on candidate set + RRF fuse
+            logger.info("Retrieval: BM25+RRF fuse | candidates=%d", len(vector_docs))
+            bm25_ranked = [d for d, _s in bm25_rank(query, vector_docs)]
+            fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
+        else:
+            fused_docs = vector_docs
         if trace is not None:
             trace["fused_candidates"] = len(fused_docs)
 
@@ -121,13 +126,15 @@ class ExpertRetriever:
             trace["postfiltered_count"] = len(filtered)
 
         if self.rerank_enabled and filtered:
-            logger.info("Retrieval: rerank | top_k=%d model=%s", self.rerank_top_k, self.rerank_model)
+            logger.info("Retrieval: rerank | top_n=%d model=%s", self.rerank_top_n, self.rerank_model)
             candidate_k = min(self.rerank_candidates, len(filtered))
             reranker = CrossEncoderReranker(model_name=self.rerank_model, device=self.rerank_device)
             reranked = reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
+            top_n = min(self.rerank_top_n, len(reranked))
+            reranked = reranked[:top_n]
 
             reranked_keys = {_doc_key(d) for d in reranked}
-            remainder = [d for d in filtered[candidate_k:] if _doc_key(d) not in reranked_keys]
+            remainder = [d for d in filtered if _doc_key(d) not in reranked_keys]
             filtered = reranked + remainder
 
         filtered = self._apply_diversity(filtered)
@@ -150,7 +157,7 @@ class ExpertRetriever:
             return f"{src} (page {page + 1}) #{chunk_id}"
         return f"{src} #{chunk_id}"
 
-    def _build_where_minimal(self, f: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_where(self, f: Dict[str, Any]) -> Dict[str, Any]:
         """
         Keep vectorstore filter minimal to avoid backend-specific boolean expressions.
         """
@@ -158,6 +165,19 @@ class ExpertRetriever:
         stage = f.get("stage")
         if stage and stage != "unknown":
             where["stage"] = str(stage).lower()
+        if not self.where_full:
+            return where
+
+        if f.get("T_range_K"):
+            where["T_range_K"] = f.get("T_range_K")
+        if f.get("P_range_MPa"):
+            where["P_range_MPa"] = f.get("P_range_MPa")
+        if f.get("gas_agent"):
+            where["gas_agent"] = f.get("gas_agent")
+        if f.get("targets"):
+            where["targets"] = f.get("targets")
+        if f.get("document_id"):
+            where["document_id"] = f.get("document_id")
         return where
 
     def _post_filter_and_rank(self, docs: List[Document], f: Dict[str, Any]) -> List[Document]:

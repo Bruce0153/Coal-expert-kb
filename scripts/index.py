@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
+from coal_kb.cli_ui import print_banner, print_kv, print_stats_table, progress_status
 from coal_kb.logging import setup_logging
 from coal_kb.pipelines.ingest_pipeline import IngestPipeline
 from coal_kb.settings import load_config
@@ -38,16 +39,27 @@ def main() -> None:
 
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
+    print_banner("Coal KB Index Manager", f"backend={cfg.backend}")
 
     elastic_store = ElasticStore(
         host=cfg.elastic.host,
         verify_certs=cfg.elastic.verify_certs,
+        timeout_s=cfg.elastic.timeout_s,
     )
 
     if args.cmd == "build":
         if args.embedding_version:
             cfg.model_versions.embedding_version = args.embedding_version
         cfg.backend = "elastic"
+        print_kv(
+            "Index Build",
+            {
+                "embedding_version": cfg.model_versions.embedding_version,
+                "index_prefix": cfg.elastic.index_prefix,
+                "alias_current": cfg.elastic.alias_current,
+                "alias_prev": cfg.elastic.alias_prev,
+            },
+        )
         dims = _resolve_dims(cfg)
         schema_sig = stable_chunk_id(Path("configs/schema.yaml").read_text(encoding="utf-8"))
         schema_hash = schema_sig[:8]
@@ -63,7 +75,17 @@ def main() -> None:
             new_index=index_name,
         )
         pipe = IngestPipeline(cfg=cfg)
-        pipe.run(rebuild=True, elastic_index_override=index_name)
+        with progress_status("Building index"):
+            stats = pipe.run(rebuild=True, elastic_index_override=index_name)
+        print_stats_table(
+            "Build Summary",
+            [
+                ("index", index_name),
+                ("indexed", str(stats.get("indexed"))),
+                ("chunks", str(stats.get("chunks"))),
+                ("elapsed_s", str(stats.get("elapsed_s"))),
+            ],
+        )
         logger.info("Index build complete: %s", index_name)
         return
 
@@ -73,6 +95,13 @@ def main() -> None:
             alias_prev=cfg.elastic.alias_prev,
             new_index=args.index,
         )
+        print_stats_table(
+            "Alias Switch",
+            [
+                ("alias_current", cfg.elastic.alias_current),
+                ("new_index", args.index),
+            ],
+        )
         logger.info("Switched alias to %s", args.index)
         return
 
@@ -80,6 +109,13 @@ def main() -> None:
         elastic_store.rollback(
             alias_current=cfg.elastic.alias_current,
             alias_prev=cfg.elastic.alias_prev,
+        )
+        print_stats_table(
+            "Alias Rollback",
+            [
+                ("alias_current", cfg.elastic.alias_current),
+                ("alias_prev", cfg.elastic.alias_prev),
+            ],
         )
         logger.info("Rollback complete.")
 

@@ -6,6 +6,7 @@ import logging
 import time
 
 from coal_kb.logging import setup_logging
+from coal_kb.cli_ui import print_banner, print_kv, print_stats_table
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.llm.factory import LLMConfig
 from coal_kb.metadata.normalize import Ontology
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ask the expert KB with metadata-aware retrieval.")
-    parser.add_argument("--k", type=int, default=6)
+    parser.add_argument("--k", type=int, default=None)
     parser.add_argument("--llm", action="store_true", help="Enable LLM answer generation.")
     parser.add_argument("--rerank", action="store_true", help="Enable cross-encoder reranking.")
     parser.add_argument(
@@ -53,6 +54,7 @@ def main() -> None:
 
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
+    print_banner("Coal KB Ask", f"backend={cfg.backend}")
 
     onto = Ontology.load("configs/schema.yaml")
     parser_ = FilterParser(onto=onto)
@@ -77,11 +79,13 @@ def main() -> None:
         elastic_store = ElasticStore(
             host=cfg.elastic.host,
             verify_certs=cfg.elastic.verify_certs,
+            timeout_s=cfg.elastic.timeout_s,
         )
         elastic_factory = make_elastic_retriever_factory(
             client=elastic_store.client,
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
         )
 
     if backend == "both":
@@ -95,19 +99,32 @@ def main() -> None:
 
     rerank_enabled = args.rerank or cfg.retrieval.rerank_enabled
     rerank_model = args.rerank_model or cfg.retrieval.rerank_model
-    rerank_top_k = args.rerank_top_k or cfg.retrieval.rerank_top_k
+    rerank_top_n = args.rerank_top_k or cfg.retrieval.rerank_top_n
+
+    print_kv(
+        "Retrieval Config",
+        {
+            "backend": backend,
+            "k": str(args.k or cfg.retrieval.k),
+            "candidates": str(cfg.retrieval.candidates),
+            "rerank_enabled": str(rerank_enabled),
+            "max_per_source": str(cfg.retrieval.max_per_source),
+        },
+    )
 
     expert = ExpertRetriever(
         vector_retriever_factory=vector_factory,
-        k=args.k,
+        k=args.k or cfg.retrieval.k,
         rerank_enabled=rerank_enabled,
         rerank_model=rerank_model,
-        rerank_top_k=rerank_top_k,
-        rerank_candidates=cfg.retrieval.rerank_candidates,
+        rerank_top_n=rerank_top_n,
+        rerank_candidates=cfg.retrieval.candidates,
         rerank_device=cfg.retrieval.rerank_device,
         max_per_source=cfg.retrieval.max_per_source,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
+        use_fuse=(backend != "elastic"),
+        where_full=(backend == "elastic"),
     )
     llm_provider = args.llm_provider
     if args.llm and llm_provider == "none":
@@ -141,12 +158,20 @@ def main() -> None:
         docs = expert.retrieve(rewrite.query, f, trace=trace)
         latency_ms = (time.monotonic() - start) * 1000
         _print_trace(trace, docs)
+        print_stats_table(
+            "Query Stats",
+            [
+                ("docs", str(len(docs))),
+                ("latency_ms", f"{latency_ms:.2f}"),
+            ],
+        )
         registry.log_query(
             query=rewrite.query,
             filters=f,
             top_chunk_ids=[d.metadata.get("chunk_id") for d in docs],
             top_source_files=[d.metadata.get("source_file") for d in docs],
             latency_ms=round(latency_ms, 2),
+            backend=backend,
             tenant_id=None,
             embedding_version=cfg.model_versions.embedding_version,
             rerank_enabled=expert.rerank_enabled,

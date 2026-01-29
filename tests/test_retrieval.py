@@ -29,6 +29,12 @@ class HashEmbeddings:
         return self._vec(text)
 
 
+def _strip_lists(doc: Document) -> Document:
+    doc.metadata.pop("gas_agent", None)
+    doc.metadata.pop("targets", None)
+    return doc
+
+
 def test_filter_and_postfilter():
     onto = Ontology.load("configs/schema.yaml")
     parser = FilterParser(onto=onto)
@@ -75,7 +81,7 @@ def test_filter_and_postfilter():
             ),
         )
 
-        vs.add_documents([d1, d2])
+        vs.add_documents([_strip_lists(d1), _strip_lists(d2)])
 
         def factory(k: int, where=None):
             return vs.as_retriever(search_kwargs={"k": k, "filter": where} if where else {"k": k})
@@ -88,3 +94,83 @@ def test_filter_and_postfilter():
         assert len(docs) >= 1
         assert "a.pdf" in (docs[0].metadata.get("source_file") or "")
         assert docs[0].metadata.get("stage") == "gasification"
+
+
+def test_rerank_optional_fallback(monkeypatch):
+    onto = Ontology.load("configs/schema.yaml")
+    parser = FilterParser(onto=onto)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        vs = Chroma(
+            collection_name="test",
+            embedding_function=HashEmbeddings(),
+            persist_directory=tmp,
+        )
+
+        d1 = Document(
+            page_content="Steam gasification at 1200 K and 2 MPa produces NH3 and HCN.",
+            metadata=flatten_for_filtering(
+                {
+                    "source_file": "a.pdf",
+                    "page": 1,
+                    "stage": "gasification",
+                    "T_K": 1200.0,
+                    "P_MPa": 2.0,
+                    "gas_agent": ["steam"],
+                    "targets": ["NH3", "HCN"],
+                    "chunk_id": "c1",
+                    "section": "results",
+                },
+                onto,
+            ),
+        )
+        d2 = Document(
+            page_content="Gasification in CO2 at 1100 K.",
+            metadata=flatten_for_filtering(
+                {
+                    "source_file": "b.pdf",
+                    "page": 2,
+                    "stage": "gasification",
+                    "T_K": 1100.0,
+                    "P_MPa": 1.0,
+                    "gas_agent": ["co2"],
+                    "targets": ["NH3"],
+                    "chunk_id": "c2",
+                    "section": "results",
+                },
+                onto,
+            ),
+        )
+
+        vs.add_documents([_strip_lists(d1), _strip_lists(d2)])
+
+        def factory(k: int, where=None):
+            return vs.as_retriever(search_kwargs={"k": k, "filter": where} if where else {"k": k})
+
+        query = "steam gasification 1200K 2MPa NH3"
+        parsed = parser.parse(query)
+
+        baseline = ExpertRetriever(vector_retriever_factory=factory, k=3, k_candidates=10)
+        base_docs = baseline.retrieve(query, parsed)
+
+        real_import = __import__
+
+        def fake_import(name, *args, **kwargs):
+            if name.startswith("sentence_transformers"):
+                raise ImportError("missing")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+
+        reranked = ExpertRetriever(
+            vector_retriever_factory=factory,
+            k=3,
+            k_candidates=10,
+            rerank_enabled=True,
+            rerank_top_n=2,
+        )
+        rerank_docs = reranked.retrieve(query, parsed)
+
+        assert [d.metadata.get("chunk_id") for d in rerank_docs] == [
+            d.metadata.get("chunk_id") for d in base_docs
+        ]

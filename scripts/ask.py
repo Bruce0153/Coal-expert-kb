@@ -185,10 +185,6 @@ def main() -> None:
         print("\n" + ans)
 
 
-if __name__ == "__main__":
-    main()
-
-
 def _print_trace(trace: dict, docs: list) -> None:
     if not trace:
         return
@@ -249,3 +245,6 @@ class _CombinedRetriever:
             return []
         fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
         return fused[: self._k]
+
+if __name__ == "__main__":
+    main()

@@ -3,6 +3,9 @@ ontology:
     pyrolysis: ["pyrolysis", "热解", "热分解"]
     gasification: ["gasification", "气化"]
     coupled: ["coupled", "耦合", "联立", "combined"]
+    oxidation: ["oxidation", "氧化", "氧化反应"]
+    combustion: ["combustion", "燃烧", "燃烧反应"]
+    ignition: ["ignition", "点火", "着火"]
 
   gas_agent:
     steam: ["steam", "蒸汽", "H2O", "water vapor"]

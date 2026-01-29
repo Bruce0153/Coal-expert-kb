@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..metadata.normalize import Ontology, normalize_gas_agents, normalize_stage
+from ..metadata.normalize import Ontology, normalize_gas_agents
 
 _RE_NUM = r"(\d+(?:\.\d+)?)"
 
@@ -20,10 +20,9 @@ class FilterParser:
 
     def parse(self, query: str) -> Dict[str, Any]:
         q = query.strip()
-        q_low = q.lower()
 
         # stage & gas
-        stage = normalize_stage(q, self.onto)
+        stage, stage_candidates = self._detect_stage(q)
         gas = normalize_gas_agents(q, self.onto)
 
         # targets: keyword detect (same as ontology)
@@ -38,12 +37,29 @@ class FilterParser:
 
         return {
             "stage": stage,
+            "stage_candidates": stage_candidates,
             "coal_name": coal_name,
             "T_range_K": T_range,
             "P_range_MPa": P_range,
             "gas_agent": gas,
             "targets": targets,
         }
+
+    def _detect_stage(self, q: str) -> Tuple[str, List[str]]:
+        t = q.lower()
+        candidates: List[str] = []
+        for canonical, aliases in self.onto.stage_aliases.items():
+            if any(alias.lower() in t for alias in aliases):
+                candidates.append(canonical)
+
+        if not candidates:
+            return "unknown", []
+
+        priority = ["combustion", "ignition", "oxidation", "gasification", "pyrolysis", "coupled"]
+        for stage in priority:
+            if stage in candidates:
+                return stage, candidates
+        return candidates[0], candidates
 
     def _parse_temperature_range(self, q: str) -> Optional[List[float]]:
         # explicit range like "1100-1300 K"

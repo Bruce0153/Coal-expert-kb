@@ -28,6 +28,8 @@ This repository is designed for two end goals:
 - [Structured records (SQLite)](#structured-records-sqlite)
 - [LoRA/QLoRA fine-tuning (shortest path)](#loraqlora-fine-tuning-shortest-path)
 - [Project structure](#project-structure)
+- [Code walkthrough](#code-walkthrough)
+- [Runbook (end-to-end)](#runbook-end-to-end)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
@@ -110,6 +112,8 @@ PDFs (data/raw_pdfs/)
 Storage:
 - **Chroma** persistence: `storage/chroma_db/`
 - **SQLite** records DB: `storage/expert.db`
+- **SQLite** registry DB: `storage/kb.db` (documents/chunks/models/query logs)
+- **Elasticsearch** (optional): index data under Docker volume `elasticsearch_data`
 
 ---
 
@@ -132,6 +136,32 @@ If you plan to use **DashScope/Bailian** (recommended for LLM + embeddings):
 pip install -U langchain-openai openai python-dotenv
 ```
 
+### 2.5) (Optional) Start Elasticsearch + Kibana
+
+For local development (no security):
+
+```bash
+docker compose up -d
+```
+
+Verify Elasticsearch:
+
+```bash
+curl -s http://localhost:9200 | jq .
+```
+
+Stop services:
+
+```bash
+docker compose down
+```
+
+Remove data volumes:
+
+```bash
+docker compose down -v
+```
+
 ### 3) Add PDFs
 Put PDFs under:
 
@@ -146,12 +176,22 @@ You can use:
 
 See [Configuration guide](#configuration-guide).
 
-### 5) Ingest into Chroma
+### 5) Ingest into Elasticsearch (default)
 
 ```bash
-rm -rf storage/chroma_db
-mkdir -p storage/chroma_db
 python scripts/ingest.py
+```
+
+If the manifest detects an embeddings/chunking/schema mismatch, you will be prompted to rebuild:
+
+```bash
+python scripts/ingest.py --rebuild
+```
+
+To force ingestion without rebuilding (not recommended):
+
+```bash
+python scripts/ingest.py --force
 ```
 
 Optional: enable table extraction (Camelot):
@@ -165,6 +205,18 @@ Optional: enable LLM metadata augmentation (**LLM is configured in app.yaml**):
 
 ```bash
 python scripts/ingest.py --llm-metadata
+```
+
+By default, low-value sections (references/acknowledgements/appendix/contents) are **not** indexed.
+This keeps reference lists out of retrieval results.
+
+### 5.1) Ingest into Chroma (fallback)
+
+Set `backend: chroma` in `configs/app.yaml`, then rebuild:
+
+```bash
+rm -rf storage/chroma_db
+python scripts/ingest.py --rebuild
 ```
 
 ### 6) Ask questions (RAG)
@@ -182,6 +234,43 @@ Optional: LLM-grounded answer generation (still cites evidence):
 
 ```bash
 python scripts/ask.py --llm
+```
+
+Mechanism-style queries are automatically expanded with academic terms (rule-based by default).
+
+### 6.1) Switch backend at query time
+
+```bash
+python scripts/ask.py --backend chroma
+python scripts/ask.py --backend elastic
+python scripts/ask.py --backend both
+```
+
+### 6.2) Elastic-first workflow (recommended)
+
+```bash
+# 1) Start Elastic + Kibana
+docker compose up -d
+
+# 2) Set API key for embeddings
+export DASHSCOPE_API_KEY=sk-xxxxxxxx
+
+# 3) Build index (v1)
+python scripts/index.py build --embedding-version v1
+
+# 4) Inspect indices & aliases
+curl -s "http://localhost:9200/_cat/indices?v"
+curl -s "http://localhost:9200/_cat/aliases?v"
+
+# 5) Ask questions
+python scripts/ask.py --backend elastic
+
+# 6) Build new version (v2) and rollback if needed
+python scripts/index.py build --embedding-version v2
+python scripts/index.py rollback
+
+# 7) Evaluate retrieval
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
 ```
 
 ### 7) Extract structured records into SQLite
@@ -267,10 +356,19 @@ Sections you will typically edit:
 
 - `paths`: where PDFs / outputs / DBs are stored
 - `chunking`: chunk size and overlap
+- `chunking.profile_by_section`: section-aware chunking profiles
 - `chroma.collection_name`: Chroma collection name
 - `embedding` (**local fallback**): e.g., `BAAI/bge-m3`
 - `embeddings` (**remote**): DashScope/OpenAI-compatible embeddings
 - `llm`: DashScope/OpenAI-compatible chat model
+- `backend`: `elastic` | `chroma` | `both` (default: `elastic`)
+- `registry.sqlite_path`: registry DB path (defaults to `storage/kb.db`)
+- `model_versions.embedding_version`: index version label (e.g., `v1`)
+- `elastic`: Elasticsearch settings + aliases
+- `ingestion`: drop low-value sections during ingest
+- `retrieval`: reranker, diversity (max_per_source), and reference filtering
+- `query_rewrite`: lightweight query expansion (optional LLM)
+- `tenancy`: multi-tenant defaults and enforcement
 
 > **Important:** if you change embedding backend/model (e.g., from local to DashScope), you must **rebuild Chroma**:
 >
@@ -278,6 +376,12 @@ Sections you will typically edit:
 > rm -rf storage/chroma_db
 > python scripts/ingest.py
 > ```
+
+If you are using Elasticsearch, rebuild to create a fresh index for a new embedding version:
+
+```bash
+python scripts/index.py build --embedding-version v2
+```
 
 ### Local vs remote embeddings
 
@@ -298,10 +402,16 @@ Inputs: `data/raw_pdfs/*.pdf`
 Outputs:
 - Chroma DB: `storage/chroma_db/`
 - Enriched chunk metadata: stored as Chroma metadata
+- Registry DB: `storage/kb.db`
+- Elasticsearch index (optional): `coal_kb_chunks_*` + aliases
 
 Key options:
 - `--tables`: optional table extraction
 - `--llm-metadata`: enable LLM metadata augmentation (reads `cfg.llm`)
+
+Default cleaning:
+- drop sections: `references`, `acknowledgements`, `contents`, `appendix`
+- drop unknown chunks that look like reference lists
 
 ### Ask (`scripts/ask.py`)
 Inputs: user query  
@@ -309,6 +419,50 @@ Outputs: evidence list (and optional LLM answer)
 
 Key options:
 - `--llm`: enable LLM answer generation (reads `cfg.llm`)
+- `--backend`: `chroma` | `elastic` | `both`
+
+Query rewrite:
+- mechanism queries (e.g., “生成机理 / formation mechanism”) are expanded with academic terms
+
+### Index versioning (`scripts/index.py`)
+Manage Elasticsearch index versions and aliases.
+
+Examples:
+
+```bash
+# Build a new index + ingest (elastic backend)
+python scripts/index.py build --embedding-version v2
+
+# Switch alias_current to a specific index
+python scripts/index.py switch --index coal_kb_chunks__embv2__schemaXXXX__202401011230
+
+# Roll back alias_current to alias_prev
+python scripts/index.py rollback
+```
+
+### Inspect Elasticsearch chunks
+
+```bash
+curl -s "http://localhost:9200/coal_kb_chunks_current/_search?q=source_file:*.pdf&size=2" | jq .
+```
+
+You can also use Kibana → Discover (index pattern: `coal_kb_chunks_*`).
+
+### Retrieval evaluation (`scripts/eval_retrieval.py`)
+
+Gold format (JSONL):
+
+```json
+{"query":"steam gasification NH3 1200K","expected_sources":[{"source_file":"example.pdf","page":3}],"expected_stage":"gasification"}
+```
+
+Run evaluation:
+
+```bash
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
+```
+
+Metrics include Recall@K, FilterPrecision@K, Diversity@K, and ReferencesHit@K.
 
 ### Extract records (`scripts/extract_records.py`)
 Inputs: chunks (from Chroma)  
@@ -426,10 +580,119 @@ coal-expert-kb/
 
 ---
 
+## Code walkthrough
+
+This is a high-level map of how the code fits together, with the key inputs/outputs for each module.
+
+### Core pipeline flow
+
+1) **Parsing & cleaning** → `coal_kb/parsing/`
+   - `pdf_loader.py`: loads PDFs into page-level `Document`s and strips common header/footer noise.
+   - `table_extractor.py`: optional Camelot-based table extraction (yields table docs).
+
+2) **Chunking** → `coal_kb/chunking/`
+   - `splitter.py`: splits pages into chunks, preserves metadata.
+   - `sectioner.py`: heuristically tags sections (methods/results/…).
+
+3) **Metadata extraction** → `coal_kb/metadata/`
+   - `extract.py`: rule-first extraction of T/P ranges, ratios, coal names, etc.
+   - `normalize.py`: ontology-based normalization for stage/gas/targets.
+   - `evidence.py`: evidence spans + confidence for auditing.
+
+4) **Vectorstore & retrieval** → `coal_kb/store/` + `coal_kb/retrieval/`
+   - `chroma_store.py`: wraps Chroma and embeddings.
+   - `filter_parser.py`: parses query filters (stage/gas/T/P/targets).
+   - `retriever.py`: hybrid retrieval (vector + BM25 + RRF + post-filters).
+
+5) **QA & records** → `coal_kb/qa/` + `coal_kb/pipelines/record_pipeline.py`
+   - `rag_answer.py`: evidence-only output or LLM-based answer w/ citations.
+   - `record_pipeline.py`: LLM extraction → normalize → conflict check → SQLite.
+
+6) **Config & schema** → `coal_kb/settings.py` + `coal_kb/schema/`
+   - Central config loading, schema models, validators, and unit conversions.
+
+---
+
+## Runbook (end-to-end)
+
+This is a concrete, repeatable run sequence. Adjust paths and API keys as needed.
+
+### 0) Install
+
+```bash
+pip install -e .[dev]
+```
+
+If you plan to use remote LLM/embeddings (DashScope/OpenAI-compatible):
+
+```bash
+pip install -U langchain-openai openai python-dotenv
+```
+
+### 1) Configure
+
+Edit `configs/app.yaml`:
+- `paths` → data/storage locations
+- `llm` → DashScope/OpenAI-compatible chat model
+- `embeddings` → remote embedding model
+
+Create `.env`:
+
+```env
+DASHSCOPE_API_KEY=sk-xxxx
+```
+
+### 2) Ingest PDFs
+
+```bash
+python scripts/ingest.py
+```
+
+Manifest checks (embeddings/chunking/schema) are automatic:
+- Use `--rebuild` to clear the KB and re-ingest when signatures change.
+- Use `--force` to ingest anyway (not recommended).
+
+Optional table extraction:
+
+```bash
+python scripts/ingest.py --tables --table-flavor lattice
+```
+
+### 3) Ask questions
+
+```bash
+python scripts/ask.py
+```
+
+LLM-enabled answers:
+
+```bash
+python scripts/ask.py --llm
+```
+
+### 4) Extract structured records
+
+```bash
+python scripts/extract_records.py --llm --limit 300
+```
+
+### 5) Export for modeling
+
+```bash
+python scripts/export_records.py --out data/artifacts/records.csv
+```
+
+
 ## Testing
 
 ```bash
 pytest -q
+```
+
+### Retrieval eval
+
+```bash
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl --k 5
 ```
 
 ---

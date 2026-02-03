@@ -114,6 +114,7 @@ def main() -> None:
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=cfg.retrieval.candidates,
             rrf_k=cfg.retrieval.rrf_k,
+            use_icu=cfg.elastic.enable_icu_analyzer,
         )
 
     if vector_factory is None:
@@ -129,6 +130,9 @@ def main() -> None:
         rerank_candidates=cfg.retrieval.candidates,
         rerank_device=cfg.retrieval.rerank_device,
         max_per_source=cfg.retrieval.max_per_source,
+        max_relax_steps=cfg.retrieval.max_relax_steps,
+        range_expand_schedule=cfg.retrieval.range_expand_schedule,
+        mode=cfg.retrieval.mode,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
         use_fuse=(backend != "elastic"),

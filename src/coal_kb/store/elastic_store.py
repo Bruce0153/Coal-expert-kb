@@ -32,7 +32,7 @@ class ElasticStore:
         stamp = datetime.utcnow().strftime("%Y%m%d%H%M")
         return f"{index_prefix}__emb{embedding_version}__schema{schema_hash}__{stamp}"
 
-    def create_index(self, index_name: str, dims: int) -> None:
+    def create_index(self, index_name: str, dims: int, *, enable_icu_analyzer: bool = False) -> None:
         if self._client.indices.exists(index=index_name):
             return
         body = {
@@ -64,8 +64,32 @@ class ElasticStore:
                 }
             },
         }
+        if enable_icu_analyzer:
+            body["mappings"]["properties"]["text"]["fields"] = {
+                "icu": {"type": "text", "analyzer": "icu_analyzer"}
+            }
+            body["settings"]["analysis"] = {
+                "analyzer": {"icu_analyzer": {"type": "icu_analyzer"}}
+            }
+            self._ensure_icu_plugin()
         self._client.indices.create(index=index_name, body=body)
         logger.info("Created Elasticsearch index: %s", index_name)
+
+    def _ensure_icu_plugin(self) -> None:
+        try:
+            plugins = self._client.cat.plugins(format="json")
+        except Exception as exc:
+            raise RuntimeError(
+                "ICU analyzer requested but unable to verify plugins. "
+                "Install analysis-icu or disable elastic.enable_icu_analyzer."
+            ) from exc
+        has_icu = any("analysis-icu" in (p.get("component") or "") for p in plugins)
+        if not has_icu:
+            raise RuntimeError(
+                "ICU analyzer requested but analysis-icu is not installed. "
+                "Install via `bin/elasticsearch-plugin install analysis-icu` or disable "
+                "`elastic.enable_icu_analyzer`."
+            )
 
     def bulk_upsert_chunks(self, index_name: str, docs: Iterable[Dict[str, Any]]) -> None:
         actions = []

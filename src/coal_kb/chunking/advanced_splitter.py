@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-import re
 from typing import Dict, List
 
 from langchain_core.documents import Document
 
 from .sectioner import infer_section_with_debug
-
-
-_SENTENCE_SPLIT = re.compile(r"(?<=[\.\!\?\。\！？；;])\s+")
-
-
-def _split_sentences(text: str) -> List[str]:
-    chunks = [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
-    return chunks or [text.strip()] if text.strip() else []
+from .sentence_split import split_sentences
+from ..loaders import detect_language
 
 
 def _chunk_sentences(sentences: List[str], *, chunk_size: int, overlap: int) -> List[str]:
@@ -69,10 +62,19 @@ def split_page_docs_section_aware(
         meta["section_debug"] = debug
 
         profile = profile_by_section.get(meta["section"], {})
-        chunk_size = int(profile.get("chunk_size", default_chunk_size))
-        chunk_overlap = int(profile.get("chunk_overlap", default_chunk_overlap))
+        lang = detect_language(d.page_content or "")
+        base_chunk_size = default_chunk_size
+        base_chunk_overlap = default_chunk_overlap
+        if lang == "zh":
+            base_chunk_size = int(default_chunk_size * 0.7)
+            base_chunk_overlap = int(default_chunk_overlap * 1.3)
+        elif lang == "mixed":
+            base_chunk_size = int(default_chunk_size * 0.85)
+            base_chunk_overlap = int(default_chunk_overlap * 1.1)
+        chunk_size = int(profile.get("chunk_size", base_chunk_size))
+        chunk_overlap = int(profile.get("chunk_overlap", base_chunk_overlap))
 
-        sentences = _split_sentences(d.page_content or "")
+        sentences = split_sentences(d.page_content or "", min_len=8 if lang == "zh" else 6)
         for chunk_text in _chunk_sentences(sentences, chunk_size=chunk_size, overlap=chunk_overlap):
             output.append(Document(page_content=chunk_text, metadata=dict(meta)))
 

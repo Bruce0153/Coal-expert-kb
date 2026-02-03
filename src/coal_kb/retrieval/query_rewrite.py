@@ -29,6 +29,16 @@ _MECH_EXPANSIONS = [
     "ether bond cleavage",
 ]
 
+_ZH_EN_MAP = {
+    "热解": ["pyrolysis"],
+    "气化": ["gasification"],
+    "氧化": ["oxidation"],
+    "燃烧": ["combustion"],
+    "点火": ["ignition"],
+    "生成机理": ["formation mechanism", "reaction pathway"],
+    "机理": ["mechanism", "reaction pathway"],
+}
+
 
 @dataclass
 class QueryRewriteResult:
@@ -47,6 +57,13 @@ def rewrite_query(
         return QueryRewriteResult(query=query)
 
     lower = base.lower()
+    expansions = []
+    for zh, en_terms in _ZH_EN_MAP.items():
+        if zh in base:
+            expansions.extend(en_terms)
+    if expansions:
+        expanded = base + " " + " ".join(sorted(set(expansions)))
+        return QueryRewriteResult(query=expanded, reason="zh_rules")
     if any(k in lower for k in _MECH_KEYWORDS):
         expanded = base + " " + " ".join(_MECH_EXPANSIONS)
         return QueryRewriteResult(query=expanded, reason="mechanism_rules")

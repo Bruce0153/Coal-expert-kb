@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class PathsConfig(BaseModel):
     raw_pdfs_dir: str = "data/raw_pdfs"
+    raw_docs_dir: str = "data/raw_docs"
     interim_dir: str = "data/interim"
     artifacts_dir: str = "data/artifacts"
     chroma_dir: str = "storage/chroma_db"
@@ -52,6 +53,9 @@ class RetrievalConfig(BaseModel):
     candidates: int = 50
     rrf_k: int = 60
     max_per_source: int = 2
+    max_relax_steps: int = 2
+    range_expand_schedule: list[float] = Field(default_factory=lambda: [0.05, 0.1, 0.2])
+    mode: str = "balanced"
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
     rerank_top_n: int = 50
@@ -64,6 +68,57 @@ class RetrievalConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     level: str = "INFO"
+
+
+class RegistryConfig(BaseModel):
+    sqlite_path: str = "storage/kb.db"
+
+
+class ModelVersionsConfig(BaseModel):
+    embedding_version: str = "v1"
+
+
+class ElasticConfig(BaseModel):
+    host: str = "http://localhost:9200"
+    index_prefix: str = "coal_kb_chunks"
+    alias_current: str = "coal_kb_chunks_current"
+    alias_prev: str = "coal_kb_chunks_prev"
+    verify_certs: bool = False
+    timeout_s: int = 60
+    bulk_chunk_size: int = 200
+    enable_icu_analyzer: bool = False
+
+
+class IngestionConfig(BaseModel):
+    drop_sections: list[str] = Field(
+        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
+    )
+    drop_reference_like_unknown: bool = True
+    include_exts: list[str] = Field(
+        default_factory=lambda: [
+            "pdf",
+            "txt",
+            "md",
+            "html",
+            "docx",
+            "pptx",
+            "csv",
+            "xlsx",
+            "json",
+            "jsonl",
+        ]
+    )
+    exclude_exts: list[str] = Field(default_factory=list)
+
+
+class QueryRewriteConfig(BaseModel):
+    enable_llm: bool = False
+
+
+class TenancyConfig(BaseModel):
+    enabled: bool = False
+    default_tenant_id: str = "default"
+    enforce_tenant_filter: bool = True
 
 
 class IngestionConfig(BaseModel):
@@ -165,6 +220,7 @@ class EnvSettings(BaseSettings):
 
 def _ensure_dirs(cfg: AppConfig) -> AppConfig:
     Path(cfg.paths.raw_pdfs_dir).mkdir(parents=True, exist_ok=True)
+    Path(cfg.paths.raw_docs_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.interim_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.artifacts_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.paths.chroma_dir).mkdir(parents=True, exist_ok=True)

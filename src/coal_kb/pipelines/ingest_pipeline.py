@@ -15,6 +15,7 @@ from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.advanced_splitter import split_page_docs_section_aware
 from ..chunking.sectioner import is_reference_like
+from ..loaders import detect_language, load_any
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
 from ..parsing.pdf_loader import load_pdf_pages
@@ -128,7 +129,8 @@ class IngestPipeline:
         elastic_index_override: Optional[str] = None,
     ) -> dict:
         overall_start = time.monotonic()
-        raw_dir = Path(self.cfg.paths.raw_pdfs_dir)
+        raw_pdf_dir = Path(self.cfg.paths.raw_pdfs_dir)
+        raw_docs_dir = Path(self.cfg.paths.raw_docs_dir)
         interim_dir = Path(self.cfg.paths.interim_dir)
         manifest_path = Path(self.cfg.paths.manifest_path)
 
@@ -226,7 +228,9 @@ class IngestPipeline:
             dims = embedding_dim or len(embeddings.embed_query("dimension probe"))
             if elastic_index_override:
                 elastic_index = elastic_index_override
-                elastic_store.create_index(elastic_index, dims)
+                elastic_store.create_index(
+                    elastic_index, dims, enable_icu_analyzer=self.cfg.elastic.enable_icu_analyzer
+                )
             else:
                 current = elastic_store.resolve_current_index(self.cfg.elastic.alias_current)
                 if rebuild or not current:
@@ -236,7 +240,9 @@ class IngestPipeline:
                         embedding_version=embedding_version,
                         schema_hash=schema_hash,
                     )
-                    elastic_store.create_index(index_name, dims)
+                    elastic_store.create_index(
+                        index_name, dims, enable_icu_analyzer=self.cfg.elastic.enable_icu_analyzer
+                    )
                     elastic_store.switch_alias(
                         alias_current=self.cfg.elastic.alias_current,
                         alias_prev=self.cfg.elastic.alias_prev,
@@ -246,9 +252,22 @@ class IngestPipeline:
                 else:
                     elastic_index = self.cfg.elastic.alias_current
 
-        current_files = {str(p.resolve()): p for p in sorted(raw_dir.rglob("*.pdf"))}
+        include_exts = {ext.lower().lstrip(".") for ext in self.cfg.ingestion.include_exts}
+        exclude_exts = {ext.lower().lstrip(".") for ext in self.cfg.ingestion.exclude_exts}
+        current_files: Dict[str, Path] = {}
+        for base_dir in (raw_pdf_dir, raw_docs_dir):
+            if not base_dir.exists():
+                continue
+            for path in sorted(base_dir.rglob("*")):
+                if not path.is_file():
+                    continue
+                ext = path.suffix.lower().lstrip(".")
+                if ext in exclude_exts:
+                    continue
+                if ext and ext in include_exts:
+                    current_files[str(path.resolve())] = path
         logger.info(
-            "Stage: manifest_load_scan | pdfs=%d | elapsed=%.2fs",
+            "Stage: manifest_load_scan | docs=%d | elapsed=%.2fs",
             len(current_files),
             time.monotonic() - stage_start,
         )
@@ -271,29 +290,36 @@ class IngestPipeline:
                     sha256=entry.sha256,
                     mtime=entry.mtime_ns,
                     size=entry.size,
+                    doc_type=Path(path).suffix.lstrip("."),
+                    language=None,
+                    parser=None,
                     status="removed",
                     tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
                 )
             manifest.files.pop(path, None)
 
-        # Load PDFs (page-level)
+        # Load documents (page-level for PDF, otherwise chunk-level)
         page_docs: List[Document] = []
         changed_files: Dict[str, ManifestEntry] = {}
         changed_old_doc_ids: Dict[str, str] = {}
+        file_meta_by_path: Dict[str, Dict[str, Optional[str]]] = {}
+        doc_type_counts: Dict[str, int] = {}
+        language_counts: Dict[str, int] = {}
+        failed_docs = 0
         skipped_unchanged = 0
         skipped_same_hash = 0
         cache_hits = 0
         parsed_pages = 0
         stage_start = time.monotonic()
-        for path_str, pdf_path in current_files.items():
-            stat = pdf_path.stat()
+        for path_str, file_path in current_files.items():
+            stat = file_path.stat()
             entry = manifest.files.get(path_str)
             if entry and entry.mtime_ns == stat.st_mtime_ns and entry.size == stat.st_size:
                 skipped_unchanged += 1
                 logger.debug("File unchanged; skipped: %s", path_str)
                 continue
 
-            file_hash = sha256_file(pdf_path)
+            file_hash = sha256_file(file_path)
             if entry and entry.sha256 == file_hash:
                 manifest.files[path_str] = ManifestEntry(
                     path=path_str,
@@ -310,6 +336,9 @@ class IngestPipeline:
                     sha256=file_hash,
                     mtime=stat.st_mtime_ns,
                     size=stat.st_size,
+                    doc_type=file_path.suffix.lstrip("."),
+                    language=None,
+                    parser=None,
                     status="active",
                     tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
                 )
@@ -324,28 +353,59 @@ class IngestPipeline:
             if entry:
                 changed_old_doc_ids[path_str] = entry.sha256
 
-            cache_path = _cache_path_for_pdf(interim_dir, str(pdf_path))
-            cached = _load_pages_cache(cache_path)
-            if cached is not None:
-                page_docs.extend(cached)
-                cache_hits += 1
-                parsed_pages += len(cached)
-                continue
-
-            try:
-                docs = load_pdf_pages(pdf_path)
-            except Exception as e:
-                logger.warning("Failed to parse PDF: %s error=%s", pdf_path, e)
-                continue
+            docs: List[Document] = []
+            ext = file_path.suffix.lower().lstrip(".")
+            if ext == "pdf":
+                cache_path = _cache_path_for_pdf(interim_dir, str(file_path))
+                cached = _load_pages_cache(cache_path)
+                if cached is not None:
+                    page_docs.extend(cached)
+                    cache_hits += 1
+                    parsed_pages += len(cached)
+                    continue
+                try:
+                    docs = load_pdf_pages(file_path)
+                except Exception as e:
+                    logger.warning("Failed to parse PDF: %s error=%s", file_path, e)
+                    continue
+                if docs:
+                    _save_pages_cache(cache_path, docs)
+                else:
+                    logger.warning("Parsed 0 pages; skipping PDF: %s", file_path)
+            else:
+                try:
+                    docs = load_any(str(file_path))
+                except Exception as e:
+                    logger.warning("Failed to parse document: %s error=%s", file_path, e)
+                    docs = []
             if docs:
-                _save_pages_cache(cache_path, docs)
+                doc_type = ext or "unknown"
+                parser = "pdf" if ext == "pdf" else "loader"
+                languages = []
+                for doc in docs:
+                    meta = dict(doc.metadata or {})
+                    if ext == "pdf":
+                        meta.setdefault("doc_type", "pdf")
+                        meta.setdefault("parser", "pdf")
+                        meta.setdefault("language", detect_language(doc.page_content or ""))
+                    languages.append(str(meta.get("language") or "unknown"))
+                    doc.metadata = meta
+                lang = languages[0] if languages else "unknown"
+                file_meta_by_path[path_str] = {
+                    "doc_type": doc_type,
+                    "language": lang,
+                    "parser": parser,
+                }
+                doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
+                language_counts[lang] = language_counts.get(lang, 0) + 1
                 page_docs.extend(docs)
                 parsed_pages += len(docs)
             else:
-                logger.warning("Parsed 0 pages; skipping PDF: %s", pdf_path)
+                failed_docs += 1
+                logger.warning("Parsed 0 docs; skipping file: %s", file_path)
 
         logger.info(
-            "Stage: pdf_parse | changed=%d skipped=%d metadata_only=%d cache_hits=%d pages=%d | elapsed=%.2fs",
+            "Stage: doc_parse | changed=%d skipped=%d metadata_only=%d cache_hits=%d docs=%d | elapsed=%.2fs",
             len(changed_files),
             skipped_unchanged,
             skipped_same_hash,
@@ -353,6 +413,10 @@ class IngestPipeline:
             parsed_pages,
             time.monotonic() - stage_start,
         )
+        if doc_type_counts:
+            logger.info("Stage: doc_parse_types | types=%s", doc_type_counts)
+        if language_counts:
+            logger.info("Stage: doc_parse_lang | langs=%s", language_counts)
 
         # Optional: table extraction (as extra docs)
         if self.enable_table_extraction:
@@ -360,10 +424,12 @@ class IngestPipeline:
             tex = TableExtractor(flavor=self.table_flavor)
             # naive: run over files again
             table_docs = 0
-            for path_str, pdf_path in current_files.items():
+            for path_str, file_path in current_files.items():
                 if path_str not in changed_files:
                     continue
-                extracted = tex.extract(pdf_path)
+                if Path(path_str).suffix.lower() != ".pdf":
+                    continue
+                extracted = tex.extract(file_path)
                 table_docs += len(extracted)
                 page_docs.extend(extracted)
             logger.info(
@@ -377,14 +443,17 @@ class IngestPipeline:
             stats = {
                 "run_id": run_id,
                 "embedding_version": embedding_version,
-                "pdfs_scanned": len(current_files),
-                "pdfs_changed": len(changed_files),
-                "pdfs_removed": len(removed),
+                "docs_scanned": len(current_files),
+                "docs_changed": len(changed_files),
+                "docs_removed": len(removed),
                 "pages_parsed": parsed_pages,
                 "docs": 0,
                 "chunks": 0,
                 "indexed": 0,
                 "skipped": skipped_unchanged + skipped_same_hash,
+                "doc_type_counts": doc_type_counts,
+                "language_counts": language_counts,
+                "failed_docs": failed_docs,
                 "dropped_chunks": 0,
                 "dropped_by_section": {},
                 "dropped_reference_like": 0,
@@ -593,12 +662,16 @@ class IngestPipeline:
         )
 
         for path_str, entry in changed_files.items():
+            meta = file_meta_by_path.get(path_str) or {}
             registry.upsert_document(
                 document_id=entry.sha256,
                 source_file=path_str,
                 sha256=entry.sha256,
                 mtime=entry.mtime_ns,
                 size=entry.size,
+                doc_type=meta.get("doc_type"),
+                language=meta.get("language"),
+                parser=meta.get("parser"),
                 status="active",
                 tenant_id=self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
             )
@@ -702,14 +775,17 @@ class IngestPipeline:
         stats = {
             "run_id": run_id,
             "embedding_version": embedding_version,
-            "pdfs_scanned": len(current_files),
-            "pdfs_changed": len(changed_files),
-            "pdfs_removed": len(removed),
+            "docs_scanned": len(current_files),
+            "docs_changed": len(changed_files),
+            "docs_removed": len(removed),
             "pages_parsed": parsed_pages,
             "docs": len(page_docs),
             "chunks": len(chunks),
             "indexed": indexed_count,
             "skipped": skipped_unchanged + skipped_same_hash,
+            "doc_type_counts": doc_type_counts,
+            "language_counts": language_counts,
+            "failed_docs": failed_docs,
             "dropped_chunks": sum(dropped_by_section.values()) + dropped_reference_like,
             "dropped_by_section": dropped_by_section,
             "dropped_reference_like": dropped_reference_like,

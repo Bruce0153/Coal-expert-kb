@@ -38,6 +38,7 @@ def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
     registry.log_query(
         query="steam gasification",
         filters={"stage": "gasification"},
+        constraints={"constraints": []},
         top_chunk_ids=["c1"],
         top_source_files=["a.pdf"],
         latency_ms=12.3,
@@ -45,6 +46,9 @@ def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
         tenant_id=None,
         embedding_version="v1",
         rerank_enabled=True,
+        mode="balanced",
+        relax_steps=["expand_numeric_range=5%"],
+        diversity_k=1,
     )
 
     registry.log_run_metrics(

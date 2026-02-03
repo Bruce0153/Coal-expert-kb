@@ -162,12 +162,16 @@ Remove data volumes:
 docker compose down -v
 ```
 
-### 3) Add PDFs
-Put PDFs under:
+### 3) Add documents
+Put documents under:
 
 ```text
 data/raw_pdfs/
+data/raw_docs/
 ```
+
+Supported formats: pdf, txt, md, html, docx, pptx, csv, xlsx, json, jsonl.
+Optional loaders (html/docx/pptx/xlsx) require extras: `pip install .[docs]`.
 
 ### 4) Configure (`configs/app.yaml`)
 You can use:
@@ -263,7 +267,7 @@ curl -s "http://localhost:9200/_cat/indices?v"
 curl -s "http://localhost:9200/_cat/aliases?v"
 
 # 5) Ask questions
-python scripts/ask.py --backend elastic
+python scripts/ask.py --backend elastic --mode balanced
 
 # 6) Validate index health
 python scripts/validate_index.py --index coal_kb_chunks_current
@@ -278,6 +282,12 @@ python scripts/index.py rollback
 # 9) Evaluate retrieval (ad-hoc metrics)
 python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
 ```
+
+### 6.3) Adaptive constraint-aware retrieval (overview)
+
+The system treats operating conditions as **soft constraints** by default. It prefers evidence
+matching temperatures/pressures/gas targets but still returns useful evidence when metadata
+is missing. Use `--mode strict|balanced|broad` to tune how aggressively constraints are applied.
 
 ### 7) Extract structured records into SQLite
 
@@ -749,3 +759,13 @@ PRs and issues are welcome:
 ## License
 
 MIT or Apache-2.0
+### Elasticsearch ICU analyzer (optional)
+
+For better Chinese BM25, install the ICU plugin and enable `elastic.enable_icu_analyzer: true`:
+
+```bash
+bin/elasticsearch-plugin install analysis-icu
+```
+
+Then rebuild the index with `python scripts/index.py build --embedding-version v1`.
+If the plugin is missing, index creation will fail with an actionable error.

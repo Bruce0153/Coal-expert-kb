@@ -69,7 +69,9 @@ def main() -> None:
             embedding_version=cfg.model_versions.embedding_version,
             schema_hash=schema_hash,
         )
-        elastic_store.create_index(index_name, dims)
+        elastic_store.create_index(
+            index_name, dims, enable_icu_analyzer=cfg.elastic.enable_icu_analyzer
+        )
         pipe = IngestPipeline(cfg=cfg)
         with progress_status("Building index"):
             stats = pipe.run(rebuild=True, elastic_index_override=index_name)
@@ -97,6 +99,8 @@ def main() -> None:
                 ("index", index_name),
                 ("indexed", str(stats.get("indexed"))),
                 ("chunks", str(stats.get("chunks"))),
+                ("doc_types", str(stats.get("doc_type_counts"))),
+                ("languages", str(stats.get("language_counts"))),
                 ("validated", str(validation.get("ok"))),
                 ("elapsed_s", str(stats.get("elapsed_s"))),
             ],

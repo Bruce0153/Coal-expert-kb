@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest PDFs into Chroma expert KB.")
+    parser = argparse.ArgumentParser(description="Ingest documents into the expert KB.")
     parser.add_argument("--tables", action="store_true", help="Enable optional table extraction (Camelot).")
     parser.add_argument("--table-flavor", default="lattice", choices=["lattice", "stream", "auto"])
     parser.add_argument(
@@ -39,7 +39,8 @@ def main() -> None:
     print_kv(
         "Config",
         {
-            "raw_dir": cfg.paths.raw_pdfs_dir,
+            "raw_pdfs_dir": cfg.paths.raw_pdfs_dir,
+            "raw_docs_dir": cfg.paths.raw_docs_dir,
             "chroma_dir": cfg.paths.chroma_dir,
             "registry_db": cfg.registry.sqlite_path,
             "embedding_model": cfg.embeddings.model,
@@ -49,8 +50,9 @@ def main() -> None:
         },
     )
     logger.info(
-        "Ingest config | raw_dir=%s chroma_dir=%s interim_dir=%s",
+        "Ingest config | raw_pdfs_dir=%s raw_docs_dir=%s chroma_dir=%s interim_dir=%s",
         cfg.paths.raw_pdfs_dir,
+        cfg.paths.raw_docs_dir,
         cfg.paths.chroma_dir,
         cfg.paths.interim_dir,
     )
@@ -79,14 +81,14 @@ def main() -> None:
         table_flavor=args.table_flavor,
         enable_llm_metadata=args.llm_metadata,
     )
-    with progress_status("Ingesting PDFs"):
+    with progress_status("Ingesting documents"):
         stats = pipe.run(rebuild=args.rebuild, force=args.force)
     elapsed = stats.get("elapsed_s", round(time.monotonic() - start, 2))
     logger.info(
         "Ingest summary | scanned=%s changed=%s removed=%s pages=%s chunks=%s indexed=%s dropped=%s elapsed=%.2fs",
-        stats.get("pdfs_scanned"),
-        stats.get("pdfs_changed"),
-        stats.get("pdfs_removed"),
+        stats.get("docs_scanned"),
+        stats.get("docs_changed"),
+        stats.get("docs_removed"),
         stats.get("pages_parsed"),
         stats.get("chunks"),
         stats.get("indexed"),
@@ -96,12 +98,14 @@ def main() -> None:
     print_stats_table(
         "Ingest Summary",
         [
-            ("pdfs_scanned", str(stats.get("pdfs_scanned"))),
-            ("pdfs_changed", str(stats.get("pdfs_changed"))),
+            ("docs_scanned", str(stats.get("docs_scanned"))),
+            ("docs_changed", str(stats.get("docs_changed"))),
             ("pages_parsed", str(stats.get("pages_parsed"))),
             ("chunks", str(stats.get("chunks"))),
             ("indexed", str(stats.get("indexed"))),
             ("dropped_chunks", str(stats.get("dropped_chunks"))),
+            ("doc_type_counts", str(stats.get("doc_type_counts"))),
+            ("language_counts", str(stats.get("language_counts"))),
             ("elapsed_s", str(elapsed)),
         ],
     )

@@ -31,6 +31,9 @@ class DocumentModel(Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     mtime: Mapped[int] = mapped_column(Integer)
     size: Mapped[int] = mapped_column(Integer)
+    doc_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    language: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    parser: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")
     tenant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -73,11 +76,15 @@ class QueryLogModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     query: Mapped[str] = mapped_column(Text)
     filters_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     top_chunk_ids_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     top_source_files_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[Optional[float]] = mapped_column(nullable=True)
     backend: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     rerank_enabled: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mode: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    relax_steps_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    diversity_k: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tenant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     embedding_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -137,10 +144,17 @@ class RegistrySQLite:
 
     def _ensure_migrations(self) -> None:
         self._ensure_column("query_logs", "filters_json", "filters_json TEXT")
+        self._ensure_column("query_logs", "constraints_json", "constraints_json TEXT")
         self._ensure_column("query_logs", "top_source_files_json", "top_source_files_json TEXT")
         self._ensure_column("query_logs", "rerank_enabled", "rerank_enabled INTEGER")
         self._ensure_column("query_logs", "backend", "backend VARCHAR(32)")
+        self._ensure_column("query_logs", "mode", "mode VARCHAR(32)")
+        self._ensure_column("query_logs", "relax_steps_json", "relax_steps_json TEXT")
+        self._ensure_column("query_logs", "diversity_k", "diversity_k INTEGER")
         self._ensure_column("documents", "title", "title TEXT")
+        self._ensure_column("documents", "doc_type", "doc_type VARCHAR(32)")
+        self._ensure_column("documents", "language", "language VARCHAR(16)")
+        self._ensure_column("documents", "parser", "parser VARCHAR(64)")
         self._ensure_column("ingestion_runs", "embedding_model", "embedding_model VARCHAR(128)")
         self._ensure_column("ingestion_runs", "embedding_dim", "embedding_dim INTEGER")
 
@@ -152,6 +166,9 @@ class RegistrySQLite:
         sha256: str,
         mtime: int,
         size: int,
+        doc_type: Optional[str] = None,
+        language: Optional[str] = None,
+        parser: Optional[str] = None,
         title: Optional[str] = None,
         status: str = "active",
         tenant_id: Optional[str] = None,
@@ -166,6 +183,9 @@ class RegistrySQLite:
                     sha256=sha256,
                     mtime=mtime,
                     size=size,
+                    doc_type=doc_type,
+                    language=language,
+                    parser=parser,
                     title=title,
                     status=status,
                     tenant_id=tenant_id,
@@ -178,6 +198,9 @@ class RegistrySQLite:
                 obj.sha256 = sha256
                 obj.mtime = mtime
                 obj.size = size
+                obj.doc_type = doc_type
+                obj.language = language
+                obj.parser = parser
                 obj.title = title
                 obj.status = status
                 obj.tenant_id = tenant_id
@@ -288,6 +311,7 @@ class RegistrySQLite:
         *,
         query: str,
         filters: Optional[Dict[str, Any]],
+        constraints: Optional[Dict[str, Any]],
         top_chunk_ids: Optional[list[str]],
         top_source_files: Optional[list[str]],
         latency_ms: Optional[float],
@@ -295,11 +319,15 @@ class RegistrySQLite:
         tenant_id: Optional[str],
         embedding_version: Optional[str],
         rerank_enabled: Optional[bool],
+        mode: Optional[str] = None,
+        relax_steps: Optional[list[str]] = None,
+        diversity_k: Optional[int] = None,
     ) -> None:
         with Session(self._engine) as sess:
             obj = QueryLogModel(
                 query=query,
                 filters_json=json.dumps(filters, ensure_ascii=False) if filters else None,
+                constraints_json=json.dumps(constraints, ensure_ascii=False) if constraints else None,
                 top_chunk_ids_json=json.dumps(top_chunk_ids, ensure_ascii=False) if top_chunk_ids else None,
                 top_source_files_json=json.dumps(top_source_files, ensure_ascii=False)
                 if top_source_files
@@ -307,6 +335,9 @@ class RegistrySQLite:
                 latency_ms=latency_ms,
                 backend=backend,
                 rerank_enabled=1 if rerank_enabled else 0 if rerank_enabled is not None else None,
+                mode=mode,
+                relax_steps_json=json.dumps(relax_steps, ensure_ascii=False) if relax_steps else None,
+                diversity_k=diversity_k,
                 tenant_id=tenant_id,
                 embedding_version=embedding_version,
                 created_at=datetime.utcnow(),

@@ -154,6 +154,7 @@ def main() -> None:
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=cfg.retrieval.candidates,
             rrf_k=cfg.retrieval.rrf_k,
+            use_icu=cfg.elastic.enable_icu_analyzer,
         )
 
     expert = ExpertRetriever(
@@ -165,6 +166,9 @@ def main() -> None:
         rerank_candidates=cfg.retrieval.candidates,
         rerank_device=cfg.retrieval.rerank_device,
         max_per_source=cfg.retrieval.max_per_source,
+        max_relax_steps=cfg.retrieval.max_relax_steps,
+        range_expand_schedule=cfg.retrieval.range_expand_schedule,
+        mode=cfg.retrieval.mode,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
         use_fuse=(backend != "elastic"),
@@ -190,7 +194,7 @@ def main() -> None:
         for k in (1, 3, 5):
             if recall_at_k(meta_list, item.expected_sources, k):
                 recalls[k] += 1
-            precisions[k] += _filter_precision_at_k(meta_list, parsed, k)
+            precisions[k] += _filter_precision_at_k(meta_list, parsed.compat_where, k)
             diversities[k] += len({m.get("source_file") for m in meta_list[:k] if m.get("source_file")})
             if any(
                 (str(m.get("section", "")).lower() == "references") or is_reference_like(docs[i].page_content or "")

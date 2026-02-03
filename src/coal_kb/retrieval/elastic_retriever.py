@@ -20,6 +20,7 @@ class ElasticRetriever:
     k: int = 6
     candidates: int = 50
     rrf_k: int = 60
+    use_icu: bool = False
     tenant_id: Optional[str] = None
     where: Optional[Dict[str, Any]] = None
 
@@ -31,12 +32,13 @@ class ElasticRetriever:
         filters = self._build_filters()
         top_n = max(self.candidates, self.k)
 
+        text_field = "text.icu" if self.use_icu else "text"
         bm25_body = {
             "size": top_n,
             "query": {
                 "bool": {
                     "filter": filters,
-                    "must": [{"match": {"text": {"query": query}}}],
+                    "must": [{"match": {text_field: {"query": query}}}],
                 }
             },
         }
@@ -153,6 +155,7 @@ def make_elastic_retriever_factory(
     embeddings_cfg: EmbeddingsConfig,
     candidates: int = 50,
     rrf_k: int = 60,
+    use_icu: bool = False,
     tenant_id: Optional[str] = None,
 ):
     def factory(k: int, where: Optional[Dict[str, Any]] = None):
@@ -163,6 +166,7 @@ def make_elastic_retriever_factory(
             k=k,
             candidates=candidates,
             rrf_k=rrf_k,
+            use_icu=use_icu,
             tenant_id=tenant_id,
             where=where,
         )

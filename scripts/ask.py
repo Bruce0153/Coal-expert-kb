@@ -51,6 +51,12 @@ def main() -> None:
         choices=["chroma", "elastic", "both"],
         help="Override backend config (chroma|elastic|both).",
     )
+    parser.add_argument(
+        "--mode",
+        default=None,
+        choices=["strict", "balanced", "broad"],
+        help="Constraint mode (strict|balanced|broad).",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -88,6 +94,7 @@ def main() -> None:
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=cfg.retrieval.candidates,
             rrf_k=cfg.retrieval.rrf_k,
+            use_icu=cfg.elastic.enable_icu_analyzer,
             tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
         )
 
@@ -106,6 +113,7 @@ def main() -> None:
     rerank_model = args.rerank_model or cfg.retrieval.rerank_model
     rerank_top_n = args.rerank_top_k or cfg.retrieval.rerank_top_n
 
+    mode = args.mode or cfg.retrieval.mode
     print_kv(
         "Retrieval Config",
         {
@@ -114,6 +122,7 @@ def main() -> None:
             "candidates": str(cfg.retrieval.candidates),
             "rerank_enabled": str(rerank_enabled),
             "max_per_source": str(cfg.retrieval.max_per_source),
+            "mode": mode,
         },
     )
 
@@ -126,19 +135,23 @@ def main() -> None:
         rerank_candidates=cfg.retrieval.candidates,
         rerank_device=cfg.retrieval.rerank_device,
         max_per_source=cfg.retrieval.max_per_source,
+        max_relax_steps=cfg.retrieval.max_relax_steps,
+        range_expand_schedule=cfg.retrieval.range_expand_schedule,
+        mode=mode,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
         use_fuse=(backend != "elastic"),
         where_full=(backend == "elastic"),
     )
-    provider = args.llm_provider
-    if provider == "none":
-        provider = cfg.llm.provider
+    llm_provider = args.llm_provider
+    if args.llm and llm_provider == "none":
+        llm_provider = cfg.llm.provider
 
+    provider = llm_provider if llm_provider != "none" else cfg.llm.provider
     llm_cfg = LLMConfig(**{**cfg.llm.model_dump(), "provider": provider})
-
     answerer = RAGAnswerer(
         enable_llm=args.llm,
+        llm_provider=llm_provider,
         llm_config=llm_cfg,
     )
 
@@ -152,8 +165,17 @@ def main() -> None:
             enable_llm=cfg.query_rewrite.enable_llm and args.llm,
             llm_config=llm_cfg,
         )
-        print("\n解析到的过滤条件:")
-        print(json.dumps(f, ensure_ascii=False, indent=2))
+        print("\n解析到的约束:")
+        constraints_view = [
+            {
+                "name": c.name,
+                "value": c.value,
+                "confidence": c.confidence,
+                "priority": c.priority,
+            }
+            for c in f.constraints
+        ]
+        print(json.dumps(constraints_view, ensure_ascii=False, indent=2))
         if rewrite.reason:
             print(f"查询扩展: {rewrite.reason}")
             print(rewrite.query)
@@ -171,18 +193,26 @@ def main() -> None:
         )
         registry.log_query(
             query=rewrite.query,
-            filters=f,
+            filters=f.compat_where,
+            constraints={"constraints": constraints_view},
             top_chunk_ids=[d.metadata.get("chunk_id") for d in docs],
             top_source_files=[d.metadata.get("source_file") for d in docs],
             latency_ms=round(latency_ms, 2),
             backend=backend,
-            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else "default",
+            tenant_id=None,
             embedding_version=cfg.model_versions.embedding_version,
             rerank_enabled=expert.rerank_enabled,
+            mode=mode,
+            relax_steps=trace.get("relax_steps_taken"),
+            diversity_k=trace.get("diversity@k"),
         )
-
         ans = answerer.answer(q, docs)
         print("\n" + ans)
+
+
+if __name__ == "__main__":
+    main()
+
 
 def _print_trace(trace: dict, docs: list) -> None:
     if not trace:
@@ -198,6 +228,9 @@ def _print_trace(trace: dict, docs: list) -> None:
 
     print("\nRetrieval trace:")
     print(f"  where: {where}")
+    relax_steps = trace.get("relax_steps_taken") or []
+    if relax_steps:
+        print(f"  relax_steps: {relax_steps}")
     print(f"  counts: vector={counts['vector']} fused={counts['fused']} postfiltered={counts['postfiltered']}")
     if vector_cites:
         print("  top vector candidates:")
@@ -244,6 +277,3 @@ class _CombinedRetriever:
             return []
         fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
         return fused[: self._k]
-
-if __name__ == "__main__":
-    main()

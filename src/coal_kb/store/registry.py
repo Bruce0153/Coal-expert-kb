@@ -12,6 +12,9 @@ class Registry(Protocol):
         sha256: str,
         mtime: int,
         size: int,
+        doc_type: Optional[str] = None,
+        language: Optional[str] = None,
+        parser: Optional[str] = None,
         title: Optional[str] = None,
         status: str = "active",
         tenant_id: Optional[str] = None,
@@ -39,6 +42,7 @@ class Registry(Protocol):
         *,
         query: str,
         filters: Optional[Dict[str, Any]],
+        constraints: Optional[Dict[str, Any]],
         top_chunk_ids: Optional[list[str]],
         top_source_files: Optional[list[str]],
         latency_ms: Optional[float],
@@ -46,6 +50,9 @@ class Registry(Protocol):
         rerank_enabled: Optional[bool],
         tenant_id: Optional[str],
         embedding_version: Optional[str],
+        mode: Optional[str] = None,
+        relax_steps: Optional[list[str]] = None,
+        diversity_k: Optional[int] = None,
     ) -> None: ...
 
     def log_run_metrics(

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any, Dict, List, Optional
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 from ..embeddings.factory import make_embeddings, EmbeddingsConfig
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ChromaStore:
@@ -46,10 +49,42 @@ class ChromaStore:
     def vectorstore(self) -> Chroma:
         return self._vs
 
-    def add_documents(self, docs: List[Document]) -> None:
+    def add_documents(self, docs: List[Document], *, ids: Optional[List[str]] = None) -> None:
         if not docs:
             return
-        self._vs.add_documents(docs)
+        filtered_docs: List[Document] = []
+        filtered_ids: Optional[List[str]] = [] if ids is not None else None
+        for idx, doc in enumerate(docs):
+            text = (doc.page_content or "").strip()
+            if not text:
+                continue
+            filtered_docs.append(doc)
+            if filtered_ids is not None:
+                filtered_ids.append(ids[idx])
+        if len(filtered_docs) != len(docs):
+            logger.info("Filtered empty texts | removed=%d", len(docs) - len(filtered_docs))
+        if not filtered_docs:
+            return
+        batch_size = len(filtered_docs)
+        logger.info(
+            "Chroma add_documents | docs=%d ids=%s batch_size=%d",
+            len(filtered_docs),
+            ids is not None,
+            batch_size,
+        )
+        try:
+            if filtered_ids is not None:
+                self._vs.add_documents(filtered_docs, ids=filtered_ids)
+            else:
+                self._vs.add_documents(filtered_docs)
+        except Exception as e:
+            logger.error("Chroma add_documents failed | error=%s", e)
+            raise
+
+    def delete_where(self, where: Dict[str, Any]) -> None:
+        if not where:
+            return
+        self._vs.delete(where=where)
 
     def as_retriever(self, *, k: int = 5, where: Optional[Dict[str, Any]] = None):
         """

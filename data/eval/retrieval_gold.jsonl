@@ -1,0 +1,5 @@
+{"query":"steam gasification NH3 1200K","expected_sources":[{"source_file":"example.pdf","page":3}],"expected_stage":"gasification"}
+{"query":"coal pyrolysis phenols formation mechanism","expected_sources":[{"source_file":"review.pdf","page":5}],"expected_stage":"pyrolysis"}
+{"query":"oxidation ignition temperature coal","expected_sources":[{"source_file":"oxidation.pdf","page":2}],"expected_stage":"oxidation"}
+{"query":"combustion NOx formation 1 MPa","expected_sources":[{"source_file":"combustion.pdf","page":4}],"expected_stage":"combustion"}
+{"query":"CO2 gasification HCN","expected_sources":[{"source_file":"gasification.pdf","page":6}],"expected_stage":"gasification"}

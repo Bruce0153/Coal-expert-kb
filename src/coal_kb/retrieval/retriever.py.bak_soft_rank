@@ -207,38 +207,24 @@ class ExpertRetriever:
     def _soft_rank(
         self, docs: List[Document], constraints: List[Constraint]
     ) -> Tuple[List[Document], Dict[str, float]]:
-        """
-        Hard-filter:
-          - drop_sections: remove docs whose metadata.section is in drop_sections
-          - drop_reference_like: remove docs whose content looks like references
-        This MUST truly drop documents (not just down-score), otherwise references can leak into top-k.
-        """
         if not docs:
             return [], {}
-
-        drop_sections = {s.lower().strip() for s in (self.drop_sections or [])}
+        drop_sections = {s.lower() for s in (self.drop_sections or [])}
         scores: Dict[str, float] = {}
-        kept_docs: List[Document] = []
-
         for idx, d in enumerate(docs):
-            meta = d.metadata or {}
-            section = str(meta.get("section", "unknown")).lower().strip()
-
+            m = d.metadata or {}
+            section = str(m.get("section", "unknown")).lower()
             if drop_sections and section in drop_sections:
+                scores[_doc_key(d)] = -10.0
                 continue
-
             if self.drop_reference_like and is_reference_like(d.page_content or ""):
+                scores[_doc_key(d)] = -10.0
                 continue
-
             score = 0.0
             for c in constraints:
-                score += self._constraint_score(meta, c)
-
-            # small bias to earlier candidates
+                score += self._constraint_score(m, c)
             scores[_doc_key(d)] = score + (1.0 / (idx + 1))
-            kept_docs.append(d)
-
-        ranked = sorted(kept_docs, key=lambda d: scores.get(_doc_key(d), 0.0), reverse=True)
+        ranked = sorted(docs, key=lambda d: scores.get(_doc_key(d), 0.0), reverse=True)
         return ranked, scores
 
     def _constraint_score(self, meta: Dict[str, Any], c: Constraint) -> float:

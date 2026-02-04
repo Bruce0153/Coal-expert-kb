@@ -4,6 +4,7 @@ import json
 import logging
 import shutil
 import time
+import os
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ from ..store.registry_sqlite import RegistrySQLite
 from ..store.registry import Registry
 from ..utils.file_hash import sha256_file
 from ..utils.hash import stable_chunk_id
+from ..utils.unicode_sanitize import sanitize_obj
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,22 +64,76 @@ def _cache_path_for_pdf(interim_dir: Path, pdf_path: str) -> Path:
     safe = stable_chunk_id(pdf_path, stamp)
     return interim_dir / f"pages_{safe}.jsonl"
 
+def _clean_surrogates(obj):
+    # 递归清洗：dict/list/str
+    if isinstance(obj, str):
+        return "".join(ch if not (0xD800 <= ord(ch) <= 0xDFFF) else "\uFFFD" for ch in obj)
+    if isinstance(obj, list):
+        return [_clean_surrogates(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _clean_surrogates(v) for k, v in obj.items()}
+    return obj
 
-def _save_pages_cache(path: Path, docs: List[Document]) -> None:
-    with path.open("w", encoding="utf-8") as f:
+def _save_pages_cache(cache_path: Path, docs: List[Document]) -> None:
+    """
+    Safe JSONL cache writer:
+    - sanitize invalid unicode (surrogates, etc.)
+    - atomic write (tmp -> replace)
+    - write both text + page_content for backward/forward compatibility
+    """
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+
+    # errors="replace" 是最后一道保险，避免任何脏字符导致崩溃
+    with tmp.open("w", encoding="utf-8", errors="replace") as f:
         for d in docs:
-            payload = {"text": d.page_content, "metadata": d.metadata}
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            rec = {
+                "text": d.page_content,
+                "page_content": d.page_content,  # 兼容旧 schema
+                "metadata": d.metadata or {},
+            }
 
+            rec, _stats = sanitize_obj(rec)
 
-def _load_pages_cache(path: Path) -> Optional[List[Document]]:
-    if not path.exists():
+            text = rec.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    tmp.replace(cache_path)
+
+def _load_pages_cache(cache_path: Path) -> Optional[List[Document]]:
+    """
+    Robust cache loader:
+    - return None if cache file does not exist (treat as cache miss)
+    - tolerate older schema keys: text / page_content / content
+    - skip corrupted lines or records missing content
+    """
+    if not cache_path.exists():
         return None
+
     docs: List[Document] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            docs.append(Document(page_content=obj["text"], metadata=obj.get("metadata") or {}))
+    with cache_path.open("r", encoding="utf-8", errors="replace") as f:
+        for lineno, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+
+            text = obj.get("text") or obj.get("page_content") or obj.get("content")
+            if not isinstance(text, str) or not text.strip():
+                continue
+
+            meta = obj.get("metadata") or {}
+            if not isinstance(meta, dict):
+                meta = {}
+
+            docs.append(Document(page_content=text, metadata=meta))
+
     return docs
 
 
@@ -252,7 +309,8 @@ class IngestPipeline:
                 else:
                     elastic_index = self.cfg.elastic.alias_current
 
-        include_exts = {ext.lower().lstrip(".") for ext in self.cfg.ingestion.include_exts}
+        include_exts_cfg = getattr(self.cfg.ingestion, "include_exts", ["pdf"])
+        include_exts = {ext.lower().lstrip(".") for ext in include_exts_cfg}
         exclude_exts = {ext.lower().lstrip(".") for ext in self.cfg.ingestion.exclude_exts}
         current_files: Dict[str, Path] = {}
         for base_dir in (raw_pdf_dir, raw_docs_dir):
@@ -358,7 +416,7 @@ class IngestPipeline:
             if ext == "pdf":
                 cache_path = _cache_path_for_pdf(interim_dir, str(file_path))
                 cached = _load_pages_cache(cache_path)
-                if cached is not None:
+                if cached:  # 只有非空缓存才算命中
                     page_docs.extend(cached)
                     cache_hits += 1
                     parsed_pages += len(cached)

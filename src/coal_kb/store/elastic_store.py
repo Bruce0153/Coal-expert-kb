@@ -121,7 +121,11 @@ class ElasticStore:
             actions.append({"remove": {"index": current, "alias": alias_current}})
             actions.append({"add": {"index": current, "alias": alias_prev}})
         actions.append({"add": {"index": new_index, "alias": alias_current}})
-        self._client.indices.update_aliases({"actions": actions})
+        try:
+            self._client.indices.update_aliases(actions=actions)
+        except TypeError:
+            self._client.indices.update_aliases(body={"actions": actions})
+
         logger.info("Alias switched | current=%s prev=%s new=%s", alias_current, alias_prev, new_index)
 
     def rollback(self, *, alias_current: str, alias_prev: str) -> None:

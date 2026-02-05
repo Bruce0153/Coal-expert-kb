@@ -86,7 +86,7 @@ def test_filter_and_postfilter():
         def factory(k: int, where=None):
             return vs.as_retriever(search_kwargs={"k": k, "filter": where} if where else {"k": k})
 
-        expert = ExpertRetriever(vector_retriever_factory=factory, k=3, k_candidates=10)
+        expert = ExpertRetriever(vector_retriever_factory=factory, k=3)
 
         f = parser.parse("steam gasification 1200K 2MPa NH3")
         docs = expert.retrieve("steam gasification 1200K 2MPa NH3", f)
@@ -150,7 +150,7 @@ def test_rerank_optional_fallback(monkeypatch):
         query = "steam gasification 1200K 2MPa NH3"
         parsed = parser.parse(query)
 
-        baseline = ExpertRetriever(vector_retriever_factory=factory, k=3, k_candidates=10)
+        baseline = ExpertRetriever(vector_retriever_factory=factory, k=3)
         base_docs = baseline.retrieve(query, parsed)
 
         real_import = __import__
@@ -165,7 +165,6 @@ def test_rerank_optional_fallback(monkeypatch):
         reranked = ExpertRetriever(
             vector_retriever_factory=factory,
             k=3,
-            k_candidates=10,
             rerank_enabled=True,
             rerank_top_n=2,
         )

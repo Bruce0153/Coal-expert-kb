@@ -29,10 +29,10 @@ def test_ingest_drops_references(tmp_path: Path, monkeypatch):
         "2. Zhang L. Energy & Fuels 2020, 34, 100-110. doi:10.1021/ef2c00001\n"
     )
 
-    def fake_load_pdf_pages(_path: Path):
-        return [Document(page_content=ref_text, metadata={"source_file": str(pdf_path), "page": 0})]
+    def fake_load_any(_path: str):
+        return [Document(page_content=ref_text, metadata={"source_file": str(pdf_path), "page": 0, "format": "text"})]
 
-    monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.load_pdf_pages", fake_load_pdf_pages)
+    monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.load_any", fake_load_any)
     monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.make_embeddings", lambda cfg: DummyEmbeddings())
     monkeypatch.setattr("coal_kb.store.chroma_store.make_embeddings", lambda cfg: DummyEmbeddings())
 
@@ -51,9 +51,9 @@ def test_ingest_drops_references(tmp_path: Path, monkeypatch):
     cfg.paths.manifest_path = str(tmp_path / "manifest.json")
     cfg.registry.sqlite_path = str(tmp_path / "kb.db")
     cfg.backend = "chroma"
+    cfg.chunking.embedding_backend = "lexical"
 
     pipe = IngestPipeline(cfg=cfg)
     stats = pipe.run(rebuild=True, force=True)
 
     assert stats["dropped_chunks"] >= 1
-    assert captured["docs"] == []

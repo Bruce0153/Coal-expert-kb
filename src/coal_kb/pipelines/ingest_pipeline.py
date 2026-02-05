@@ -15,11 +15,11 @@ from tqdm import tqdm
 from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.advanced_splitter import split_page_docs_section_aware
+from ..chunking.splitter import split_docs_markdown_hierarchical_semantic
 from ..chunking.sectioner import is_reference_like
 from ..loaders import detect_language, load_any
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
-from ..parsing.pdf_loader import load_pdf_pages
 from ..parsing.table_extractor import TableExtractor
 from ..settings import AppConfig
 from ..store.chroma_store import ChromaStore
@@ -416,26 +416,21 @@ class IngestPipeline:
             if ext == "pdf":
                 cache_path = _cache_path_for_pdf(interim_dir, str(file_path))
                 cached = _load_pages_cache(cache_path)
-                if cached:  # 只有非空缓存才算命中
+                if cached:
                     page_docs.extend(cached)
                     cache_hits += 1
                     parsed_pages += len(cached)
                     continue
-                try:
-                    docs = load_pdf_pages(file_path)
-                except Exception as e:
-                    logger.warning("Failed to parse PDF: %s error=%s", file_path, e)
-                    continue
+            try:
+                docs = load_any(str(file_path))
+            except Exception as e:
+                logger.warning("Failed to parse document: %s error=%s", file_path, e)
+                docs = []
+            if ext == "pdf":
                 if docs:
                     _save_pages_cache(cache_path, docs)
                 else:
                     logger.warning("Parsed 0 pages; skipping PDF: %s", file_path)
-            else:
-                try:
-                    docs = load_any(str(file_path))
-                except Exception as e:
-                    logger.warning("Failed to parse document: %s error=%s", file_path, e)
-                    docs = []
             if docs:
                 doc_type = ext or "unknown"
                 parser = "pdf" if ext == "pdf" else "loader"
@@ -557,15 +552,31 @@ class IngestPipeline:
 
         # Chunk
         stage_start = time.monotonic()
-        profile_by_section = {
-            key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
-        }
-        chunks = split_page_docs_section_aware(
-            page_docs,
-            default_chunk_size=self.cfg.chunking.chunk_size,
-            default_chunk_overlap=self.cfg.chunking.chunk_overlap,
-            profile_by_section=profile_by_section,
-        )
+        strategy = self.cfg.chunking.strategy
+        has_markdown = any(str((d.metadata or {}).get("format", "")).lower() == "markdown" for d in page_docs)
+        if strategy == "legacy":
+            profile_by_section = {
+                key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
+            }
+            chunks = split_page_docs_section_aware(
+                page_docs,
+                default_chunk_size=self.cfg.chunking.chunk_size,
+                default_chunk_overlap=self.cfg.chunking.chunk_overlap,
+                profile_by_section=profile_by_section,
+            )
+        else:
+            if strategy == "markdown_hierarchical_semantic" or has_markdown:
+                chunks = split_docs_markdown_hierarchical_semantic(page_docs, self.cfg.chunking.model_dump())
+            else:
+                profile_by_section = {
+                    key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
+                }
+                chunks = split_page_docs_section_aware(
+                    page_docs,
+                    default_chunk_size=self.cfg.chunking.chunk_size,
+                    default_chunk_overlap=self.cfg.chunking.chunk_overlap,
+                    profile_by_section=profile_by_section,
+                )
         if chunks:
             avg_len = sum(len(c.page_content or "") for c in chunks) / len(chunks)
         else:

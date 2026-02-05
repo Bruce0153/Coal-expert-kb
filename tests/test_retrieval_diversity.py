@@ -87,7 +87,7 @@ def test_diversity_max_per_source():
         def factory(k: int, where=None):
             return vs.as_retriever(search_kwargs={"k": k, "filter": where} if where else {"k": k})
 
-        expert = ExpertRetriever(vector_retriever_factory=factory, k=3, k_candidates=10, max_per_source=1)
+        expert = ExpertRetriever(vector_retriever_factory=factory, k=3, max_per_source=1)
         query = "steam gasification NH3 1200K"
         parsed = parser.parse(query)
         results = expert.retrieve(query, parsed)

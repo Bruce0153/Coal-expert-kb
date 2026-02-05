@@ -57,6 +57,26 @@ class ChromaConfig(BaseModel):
     collection_name: str = "coal_gasification_papers"
 
 
+
+
+class TwoStageRetrievalConfig(BaseModel):
+    enabled: bool = True
+    parent_k_candidates: int = 200
+    parent_k_final: int = 60
+    max_parents: int = 60
+    child_k_candidates: int = 300
+    child_k_final: int = 30
+    allow_relax_in_stage2: bool = True
+
+
+class PDFMarkdownConfig(BaseModel):
+    enabled: bool = True
+    heading_max_depth: int = 4
+    two_column_mode: str = "auto"  # auto|on|off
+    drop_headers_footers: bool = True
+    min_heading_font_ratio: float = 1.15
+
+
 class RetrievalConfig(BaseModel):
     # ✅ only k (no candidates)
     k: int = 5
@@ -77,6 +97,7 @@ class RetrievalConfig(BaseModel):
         default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
     )
     drop_reference_like: bool = True
+    two_stage: TwoStageRetrievalConfig = Field(default_factory=TwoStageRetrievalConfig)
 
 
 class RerankConfig(BaseModel):
@@ -168,6 +189,7 @@ class AppConfig(BaseModel):
     rerank: RerankConfig = Field(default_factory=RerankConfig)
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
+    pdf_markdown: PDFMarkdownConfig = Field(default_factory=PDFMarkdownConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

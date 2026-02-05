@@ -144,6 +144,18 @@ def main() -> None:
         drop_reference_like=cfg.retrieval.drop_reference_like,
         use_fuse=(backend != "elastic"),
         where_full=(backend == "elastic"),
+        two_stage_enabled=(backend == "elastic" and cfg.retrieval.two_stage.enabled),
+        parent_k_candidates=cfg.retrieval.two_stage.parent_k_candidates,
+        parent_k_final=cfg.retrieval.two_stage.parent_k_final,
+        max_parents=cfg.retrieval.two_stage.max_parents,
+        child_k_candidates=cfg.retrieval.two_stage.child_k_candidates,
+        child_k_final=cfg.retrieval.two_stage.child_k_final,
+        allow_relax_in_stage2=cfg.retrieval.two_stage.allow_relax_in_stage2,
+        elastic_store=elastic_store if backend == "elastic" else None,
+        elastic_index=cfg.elastic.alias_current if backend == "elastic" else None,
+        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()) if backend == "elastic" else None,
+        elastic_use_icu=cfg.elastic.enable_icu_analyzer,
+        tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
     )
 
     llm_provider = args.llm_provider
@@ -195,6 +207,12 @@ def main() -> None:
                 ("latency_ms", f"{latency_ms:.2f}"),
             ],
         )
+
+        if docs:
+            print("\nTop evidence headings:")
+            for i, d in enumerate(docs[: min(5, len(docs))], start=1):
+                m = d.metadata or {}
+                print(f"  {i}. {m.get('heading_path') or 'N/A'} | {m.get('source_file')}#{m.get('chunk_id')}")
 
         registry.log_query(
             query=rewrite.query,

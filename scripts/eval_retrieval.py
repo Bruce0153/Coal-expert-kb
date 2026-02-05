@@ -138,39 +138,25 @@ def main() -> None:
     parser_ = FilterParser(onto=onto)
 
     backend = cfg.backend
-    if backend not in {"elastic", "chroma", "both"}:
-        raise ValueError(f"Unsupported backend: {backend}")
+    if backend != "elastic":
+        raise ValueError("Two-stage retrieval evaluation requires backend=elastic")
 
     # ✅ only k candidates are retrieved
     k = int(args.k)
 
-    vector_factory = None
-    if backend in {"chroma", "both"}:
-        store = ChromaStore(
-            persist_dir=cfg.paths.chroma_dir,
-            collection_name=cfg.chroma.collection_name,
-            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            embedding_model=cfg.embedding.model_name,
-        )
-        vector_factory = store.as_retriever
-
-    if backend in {"elastic", "both"}:
-        elastic_store = ElasticStore(
-            host=cfg.elastic.host,
-            verify_certs=cfg.elastic.verify_certs,
-            timeout_s=cfg.elastic.timeout_s,
-        )
-        vector_factory = make_elastic_retriever_factory(
-            client=elastic_store.client,
-            index=cfg.elastic.alias_current,
-            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            candidates=k,
-            rrf_k=cfg.retrieval.rrf_k,
-            use_icu=cfg.elastic.enable_icu_analyzer,
-        )
-
-    if vector_factory is None:
-        raise RuntimeError("No retriever factory configured.")
+    elastic_store = ElasticStore(
+        host=cfg.elastic.host,
+        verify_certs=cfg.elastic.verify_certs,
+        timeout_s=cfg.elastic.timeout_s,
+    )
+    vector_factory = make_elastic_retriever_factory(
+        client=elastic_store.client,
+        index=cfg.elastic.alias_current,
+        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+        candidates=k,
+        rrf_k=cfg.retrieval.rrf_k,
+        use_icu=cfg.elastic.enable_icu_analyzer,
+    )
 
     rerank_enabled = bool(cfg.retrieval.rerank_enabled)
     reranker = make_reranker(cfg) if rerank_enabled else None
@@ -189,6 +175,18 @@ def main() -> None:
         drop_reference_like=cfg.retrieval.drop_reference_like,
         use_fuse=(backend != "elastic"),
         where_full=(backend == "elastic"),
+        two_stage_enabled=cfg.retrieval.two_stage.enabled,
+        parent_k_candidates=cfg.retrieval.two_stage.parent_k_candidates,
+        parent_k_final=cfg.retrieval.two_stage.parent_k_final,
+        max_parents=cfg.retrieval.two_stage.max_parents,
+        child_k_candidates=cfg.retrieval.two_stage.child_k_candidates,
+        child_k_final=cfg.retrieval.two_stage.child_k_final,
+        allow_relax_in_stage2=cfg.retrieval.two_stage.allow_relax_in_stage2,
+        elastic_store=elastic_store,
+        elastic_index=cfg.elastic.alias_current,
+        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+        elastic_use_icu=cfg.elastic.enable_icu_analyzer,
+        tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
     )
 
     items = load_eval_set(Path(args.gold))
@@ -197,6 +195,8 @@ def main() -> None:
     precisions: Dict[int, float] = {1: 0.0, 3: 0.0, 5: 0.0}
     diversities: Dict[int, int] = {1: 0, 3: 0, 5: 0}
     reference_hits: Dict[int, int] = {1: 0, 3: 0, 5: 0}
+    parents_recall = 0
+    children_recall = 0
 
     for item in items:
         parsed = parser_.parse(item.query)
@@ -205,12 +205,18 @@ def main() -> None:
             rw = rewrite_query(item.query)
             query_text = rw.query
 
-        docs = expert.retrieve(query_text, parsed)
+        trace = {}
+        docs = expert.retrieve(query_text, parsed, trace=trace)
+        parent_ids = set(trace.get("stage1_parent_ids", []))
+        if parent_ids:
+            parents_recall += 1
         meta_list = [d.metadata or {} for d in docs]
 
         for kk in (1, 3, 5):
             if recall_at_k(meta_list, item.expected_sources, kk):
                 recalls[kk] += 1
+                if kk == 5:
+                    children_recall += 1
             precisions[kk] += _filter_precision_at_k(meta_list, parsed.compat_where, kk)
             diversities[kk] += len({m.get("source_file") for m in meta_list[:kk] if m.get("source_file")})
             if any(
@@ -233,6 +239,8 @@ def main() -> None:
         ["ReferencesHit@1", f"{reference_hits[1]}/{total}", f"{reference_hits[1] / total:.2f}"],
         ["ReferencesHit@3", f"{reference_hits[3]}/{total}", f"{reference_hits[3] / total:.2f}"],
         ["ReferencesHit@5", f"{reference_hits[5]}/{total}", f"{reference_hits[5] / total:.2f}"],
+        ["ParentsRecall(any)", f"{parents_recall}/{total}", f"{parents_recall / total:.2f}"],
+        ["ChildrenRecall@5", f"{children_recall}/{total}", f"{children_recall / total:.2f}"],
     ]
 
     headers = ["Metric", "Count", "Score"]

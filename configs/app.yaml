@@ -42,6 +42,14 @@ chunking:
       chunk_size: 750
       chunk_overlap: 120
 
+pdf_markdown:
+  enabled: true
+  heading_max_depth: 4
+  two_column_mode: auto
+  drop_headers_footers: true
+  min_heading_font_ratio: 1.15
+
+
 chroma:
   collection_name: "coal_gasification_papers"
 
@@ -95,6 +103,14 @@ retrieval:
   max_relax_steps: 2
   range_expand_schedule: [0.05, 0.1, 0.2]
   mode: "balanced"
+  two_stage:
+    enabled: true
+    parent_k_candidates: 200
+    parent_k_final: 60
+    max_parents: 60
+    child_k_candidates: 300
+    child_k_final: 30
+    allow_relax_in_stage2: true
 
   rerank_enabled: true
   rerank_top_n: 5

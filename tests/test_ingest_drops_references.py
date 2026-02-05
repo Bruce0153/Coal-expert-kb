@@ -29,10 +29,10 @@ def test_ingest_drops_references(tmp_path: Path, monkeypatch):
         "2. Zhang L. Energy & Fuels 2020, 34, 100-110. doi:10.1021/ef2c00001\n"
     )
 
-    def fake_load_any(_path: str):
+    def fake_pdf_load(self, _path: str):
         return [Document(page_content=ref_text, metadata={"source_file": str(pdf_path), "page": 0, "format": "text"})]
 
-    monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.load_any", fake_load_any)
+    monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.PDFLoader.load", fake_pdf_load)
     monkeypatch.setattr("coal_kb.pipelines.ingest_pipeline.make_embeddings", lambda cfg: DummyEmbeddings())
     monkeypatch.setattr("coal_kb.store.chroma_store.make_embeddings", lambda cfg: DummyEmbeddings())
 

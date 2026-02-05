@@ -55,8 +55,13 @@ def _hash_text(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
-def _build_chunk_id(source_file: str, heading_path: str, start: int, end: int, text: str) -> str:
-    payload = f"{source_file}|{heading_path}|{start}|{end}|{_hash_text(text)}"
+def _build_parent_id(source_file: str, heading_path: str, section_start_anchor: int) -> str:
+    payload = f"{source_file}|{heading_path}|{section_start_anchor}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _build_child_id(parent_id: str, child_local_span: str, text: str) -> str:
+    payload = f"{parent_id}|{child_local_span}|{_hash_text(text)}"
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
@@ -300,14 +305,16 @@ def split_docs_markdown_hierarchical_semantic(docs: Iterable[Document], params: 
             for parent_idx, parent_text in enumerate(parent_texts):
                 p_start = parent_idx
                 p_end = parent_idx + 1
-                parent_id = _build_chunk_id(source_file, sec.heading_path, p_start, p_end, parent_text)
+                parent_id = _build_parent_id(source_file, sec.heading_path, p_start)
                 parent_meta = {
                     **meta,
                     "chunk_id": parent_id,
                     "format": doc_format,
                     "heading_path": sec.heading_path,
                     "is_parent": True,
-                    "parent_id": None,
+                    "parent_id": parent_id,
+                    "position_start": p_start,
+                    "position_end": p_end,
                 }
                 out.append(Document(page_content=parent_text, metadata=parent_meta))
 
@@ -332,7 +339,7 @@ def split_docs_markdown_hierarchical_semantic(docs: Iterable[Document], params: 
                     overlap_tokens=params.overlap_tokens,
                 )
                 for child_idx, child_text in enumerate(child_texts):
-                    c_id = _build_chunk_id(source_file, sec.heading_path, child_idx, child_idx + 1, child_text)
+                    c_id = _build_child_id(parent_id, f"{child_idx}:{child_idx + 1}", child_text)
                     child_meta = {
                         **meta,
                         "chunk_id": c_id,
@@ -340,6 +347,8 @@ def split_docs_markdown_hierarchical_semantic(docs: Iterable[Document], params: 
                         "heading_path": sec.heading_path,
                         "is_parent": False,
                         "parent_id": parent_id,
+                        "position_start": child_idx,
+                        "position_end": child_idx + 1,
                     }
                     out.append(Document(page_content=child_text, metadata=child_meta))
 

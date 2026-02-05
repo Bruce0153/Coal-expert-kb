@@ -6,62 +6,42 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.documents import Document
 
+from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
+from coal_kb.store.elastic_store import ElasticStore
 from .bm25 import bm25_rank, rrf_fuse
-from .constraints import Constraint, ConstraintSet
 from .constraint_policy import build_plan
+from .constraints import Constraint, ConstraintSet
 from ..chunking.sectioner import is_reference_like
 
 logger = logging.getLogger(__name__)
 
 
-def _doc_range_overlap(
-    meta: dict,
-    query_range: Optional[List[float]],
-    *,
-    key_point: str,
-    key_min: str,
-    key_max: str,
-) -> bool:
+def _doc_range_overlap(meta: dict, query_range: Optional[List[float]], *, key_point: str, key_min: str, key_max: str) -> bool:
     if query_range is None:
         return True
-
     qlo, qhi = float(query_range[0]), float(query_range[1])
-
     dmin = meta.get(key_min)
     dmax = meta.get(key_max)
     if dmin is not None and dmax is not None:
-        dlo, dhi = float(dmin), float(dmax)
-        return max(dlo, qlo) <= min(dhi, qhi)
-
+        return max(float(dmin), qlo) <= min(float(dmax), qhi)
     x = meta.get(key_point)
-    if x is None:
-        return False
-    return qlo <= float(x) <= qhi
+    return x is not None and qlo <= float(x) <= qhi
 
 
 def _doc_key(d: Document) -> str:
     m = d.metadata or {}
-    return str(m.get("chunk_id") or f'{m.get("source_file","")}|{m.get("page","")}|{(d.page_content or "")[:60]}')
+    return str(m.get("chunk_id") or f'{m.get("source_file","")}|{m.get("page","")}')
 
 
 @dataclass
 class ExpertRetriever:
-    """
-    Style you requested:
-    - Only retrieve k candidates from vector store.
-    - Rerank happens only within these k docs.
-    - Final returned docs length is k.
-    """
-
     vector_retriever_factory: Any
     k: int = 6
 
-    # Rerank
     rerank_enabled: bool = False
     rerank_top_n: int = 10
-    reranker: Optional[Any] = None  # must have .rerank(query, docs, top_k=...)
+    reranker: Optional[Any] = None
 
-    # Other controls
     max_per_source: int = 2
     max_relax_steps: int = 2
     range_expand_schedule: Optional[List[float]] = None
@@ -71,194 +51,194 @@ class ExpertRetriever:
     use_fuse: bool = True
     where_full: bool = False
 
-    def retrieve(
-        self,
-        query: str,
-        parsed_filter: Union[Dict[str, Any], ConstraintSet],
-        trace: Optional[Dict[str, Any]] = None,
-    ) -> List[Document]:
-        constraint_set = (
-            parsed_filter
-            if isinstance(parsed_filter, ConstraintSet)
-            else ConstraintSet(constraints=[], compat_where=parsed_filter)
-        )
+    # two-stage elastic
+    two_stage_enabled: bool = True
+    parent_k_candidates: int = 200
+    parent_k_final: int = 60
+    max_parents: int = 60
+    child_k_candidates: int = 300
+    child_k_final: int = 30
+    allow_relax_in_stage2: bool = True
+    elastic_store: Optional[ElasticStore] = None
+    elastic_index: Optional[str] = None
+    embeddings_cfg: Optional[EmbeddingsConfig] = None
+    elastic_use_icu: bool = False
+    tenant_id: Optional[str] = None
 
-        if self.range_expand_schedule is None:
-            self.range_expand_schedule = [0.05, 0.1, 0.2]
+    def __post_init__(self) -> None:
+        self._embeddings = None
+        if self.two_stage_enabled and self.elastic_store and self.embeddings_cfg:
+            self._embeddings = make_embeddings(self.embeddings_cfg)
 
+    def retrieve(self, query: str, parsed_filter: Union[Dict[str, Any], ConstraintSet], trace: Optional[Dict[str, Any]] = None) -> List[Document]:
+        constraint_set = parsed_filter if isinstance(parsed_filter, ConstraintSet) else ConstraintSet(constraints=[], compat_where=parsed_filter)
+        if self.two_stage_enabled and self.elastic_store and self.elastic_index and self._embeddings is not None:
+            return self._retrieve_two_stage(query, constraint_set, trace)
+        return self._retrieve_single_stage(query, constraint_set, trace)
+
+    def _retrieve_two_stage(self, query: str, constraint_set: ConstraintSet, trace: Optional[Dict[str, Any]]) -> List[Document]:
         where = self._build_where(constraint_set)
-        plan = build_plan(
-            constraint_set,
-            max_relax_steps=self.max_relax_steps,
-            range_expand_schedule=self.range_expand_schedule,
+        qvec = self._embeddings.embed_query(query)
+
+        stage1_filters = dict(where)
+        if self.tenant_id:
+            stage1_filters["tenant_id"] = self.tenant_id
+        parents = self.elastic_store.search_parents(
+            index=self.elastic_index,
+            query_embedding=qvec,
+            query_text=query,
+            filters=stage1_filters,
+            k_candidates=self.parent_k_candidates,
+            k_final=self.parent_k_final,
+            use_icu=self.elastic_use_icu,
+        )
+        parent_ids = [str((d.metadata or {}).get("chunk_id")) for d in parents if (d.metadata or {}).get("chunk_id")][: self.max_parents]
+        parent_heading = {str((d.metadata or {}).get("chunk_id")): str((d.metadata or {}).get("heading_path") or "") for d in parents}
+
+        if trace is not None:
+            trace["stage1_parent_hits"] = len(parents)
+            trace["stage1_parent_ids"] = parent_ids[:5]
+
+        child_filters = dict(where)
+        if self.tenant_id:
+            child_filters["tenant_id"] = self.tenant_id
+        if parent_ids:
+            child_filters["parent_ids"] = parent_ids
+
+        children = self.elastic_store.search_children(
+            index=self.elastic_index,
+            query_embedding=qvec,
+            query_text=query,
+            filters=child_filters,
+            k_candidates=self.child_k_candidates,
+            k_final=max(self.child_k_final, self.k),
+            use_icu=self.elastic_use_icu,
         )
 
-        vec_retriever = self.vector_retriever_factory(k=self.k, where=where)
+        if not parent_ids or not children:
+            if trace is not None:
+                trace["two_stage_fallback"] = True
+            fallback_filters = dict(where)
+            if self.tenant_id:
+                fallback_filters["tenant_id"] = self.tenant_id
+            if self.allow_relax_in_stage2:
+                fallback_filters.pop("T_range_K", None)
+                fallback_filters.pop("P_range_MPa", None)
+            children = self.elastic_store.search_children(
+                index=self.elastic_index,
+                query_embedding=qvec,
+                query_text=query,
+                filters=fallback_filters,
+                k_candidates=self.child_k_candidates,
+                k_final=max(self.child_k_final, self.k),
+                use_icu=self.elastic_use_icu,
+            )
 
-        if hasattr(vec_retriever, "get_relevant_documents"):
-            vector_docs: List[Document] = vec_retriever.get_relevant_documents(query)
-        else:
-            vector_docs = vec_retriever.invoke(query)
+        for d in children:
+            meta = d.metadata or {}
+            pid = str(meta.get("parent_id") or "")
+            if pid in parent_heading:
+                meta["heading_path"] = parent_heading[pid]
+            d.metadata = meta
 
-        if trace is not None:
-            trace["where"] = where
-            trace["vector_candidates"] = len(vector_docs)
-            trace["vector_top_citations"] = [self._format_citation(d) for d in vector_docs[:3]]
-
-        if not vector_docs:
-            return []
-
-        # Optional BM25+RRF on these k docs (still works, but limited because k is small)
-        if self.use_fuse:
-            bm25_ranked = [d for d, _s in bm25_rank(query, vector_docs)]
-            fused_docs = rrf_fuse(vector_docs, bm25_ranked, k=60)
-        else:
-            fused_docs = vector_docs
-
-        if trace is not None:
-            trace["fused_candidates"] = len(fused_docs)
-
-        filtered, score_map = self._soft_rank(fused_docs, plan.soft_constraints)
-
-        if trace is not None:
-            trace["postfiltered_count"] = len(filtered)
-            trace["applied_hard_filters"] = plan.hard_where
-            trace["soft_constraints_used"] = [
-                {"name": c.name, "value": c.value, "confidence": c.confidence, "priority": c.priority}
-                for c in plan.soft_constraints
-            ]
-            trace["condition_score_top3"] = [
-                {"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)}
-                for d in filtered[:3]
-            ]
-
-        # Rerank within k
+        filtered, score_map = self._soft_rank(children, build_plan(constraint_set, max_relax_steps=self.max_relax_steps, range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2]).soft_constraints)
         if self.rerank_enabled and filtered and self.reranker is not None:
             candidate_k = min(self.k, len(filtered))
             reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
-            top_n = min(self.rerank_top_n, len(reranked))
-            reranked_top = reranked[:top_n]
+            filtered = reranked + [d for d in filtered if _doc_key(d) not in {_doc_key(x) for x in reranked}]
 
-            reranked_keys = {_doc_key(d) for d in reranked_top}
-            remainder = [d for d in filtered if _doc_key(d) not in reranked_keys]
-            filtered = reranked_top + remainder
-
-        filtered = self._apply_diversity(filtered)
-        final_docs = filtered[: self.k]
-
+        final_docs = self._apply_diversity(filtered)[: self.k]
         if trace is not None:
+            trace["postfiltered_count"] = len(filtered)
+            trace["condition_score_top3"] = [{"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)} for d in filtered[:3]]
             trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
-            trace["relax_steps_taken"] = plan.relax_steps
-            trace["diversity@k"] = len({(d.metadata or {}).get("source_file") for d in final_docs})
+        return final_docs
 
+    def _retrieve_single_stage(self, query: str, constraint_set: ConstraintSet, trace: Optional[Dict[str, Any]]) -> List[Document]:
+        where = self._build_where(constraint_set)
+        plan = build_plan(constraint_set, max_relax_steps=self.max_relax_steps, range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2])
+        vec_retriever = self.vector_retriever_factory(k=self.k, where=where)
+        vector_docs = vec_retriever.get_relevant_documents(query) if hasattr(vec_retriever, "get_relevant_documents") else vec_retriever.invoke(query)
+        if not vector_docs:
+            return []
+        fused_docs = rrf_fuse(vector_docs, [d for d, _ in bm25_rank(query, vector_docs)], k=60) if self.use_fuse else vector_docs
+        filtered, score_map = self._soft_rank(fused_docs, plan.soft_constraints)
+        if self.rerank_enabled and filtered and self.reranker is not None:
+            candidate_k = min(self.k, len(filtered))
+            reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
+            filtered = reranked + [d for d in filtered if _doc_key(d) not in {_doc_key(x) for x in reranked}]
+        final_docs = self._apply_diversity(filtered)[: self.k]
+        if trace is not None:
+            trace["where"] = where
+            trace["vector_candidates"] = len(vector_docs)
+            trace["fused_candidates"] = len(fused_docs)
+            trace["postfiltered_count"] = len(filtered)
+            trace["condition_score_top3"] = [{"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)} for d in filtered[:3]]
+            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
         return final_docs
 
     def _format_citation(self, d: Document) -> str:
         m = d.metadata or {}
         src = m.get("source_file", "unknown")
-        page_label = m.get("page_label")
-        page = m.get("page")
+        heading = m.get("heading_path")
         chunk_id = m.get("chunk_id", "")
-        if page_label:
-            return f"{src} ({page_label}) #{chunk_id}"
-        if isinstance(page, int):
-            return f"{src} (page {page + 1}) #{chunk_id}"
+        if heading:
+            return f"{src} [{heading}] #{chunk_id}"
         return f"{src} #{chunk_id}"
 
     def _build_where(self, constraint_set: ConstraintSet) -> Dict[str, Any]:
-        where: Dict[str, Any] = {}
-        for constraint in constraint_set.hard_constraints:
-            where[constraint.name] = constraint.value
+        where = {c.name: c.value for c in constraint_set.hard_constraints}
         if self.where_full and not constraint_set.constraints:
             for key, value in (constraint_set.compat_where or {}).items():
                 if key not in where and value is not None:
                     where[key] = value
         return where
 
-    def _soft_rank(
-        self, docs: List[Document], constraints: List[Constraint]
-    ) -> Tuple[List[Document], Dict[str, float]]:
-        if not docs:
-            return [], {}
-
+    def _soft_rank(self, docs: List[Document], constraints: List[Constraint]) -> Tuple[List[Document], Dict[str, float]]:
         drop_sections = {s.lower().strip() for s in (self.drop_sections or [])}
         scores: Dict[str, float] = {}
         kept_docs: List[Document] = []
-
         for idx, d in enumerate(docs):
             meta = d.metadata or {}
-            section = str(meta.get("section", "unknown")).lower().strip()
-
-            if drop_sections and section in drop_sections:
+            if drop_sections and str(meta.get("section", "unknown")).lower().strip() in drop_sections:
                 continue
-
             if self.drop_reference_like and is_reference_like(d.page_content or ""):
                 continue
-
-            score = 0.0
-            for c in constraints:
-                score += self._constraint_score(meta, c)
-
+            score = sum(self._constraint_score(meta, c) for c in constraints)
             scores[_doc_key(d)] = score + (1.0 / (idx + 1))
             kept_docs.append(d)
-
         ranked = sorted(kept_docs, key=lambda d: scores.get(_doc_key(d), 0.0), reverse=True)
         return ranked, scores
 
     def _constraint_score(self, meta: Dict[str, Any], c: Constraint) -> float:
         weight = max(0.1, c.confidence)
         if c.ctype == "range":
-            value = c.value or []
-            if not value:
-                return 0.0
-            if _doc_range_overlap(
-                meta,
-                value,
-                key_point="T_K" if c.name == "T_range_K" else "P_MPa",
-                key_min="T_min_K" if c.name == "T_range_K" else "P_min_MPa",
-                key_max="T_max_K" if c.name == "T_range_K" else "P_max_MPa",
-            ):
+            if _doc_range_overlap(meta, c.value or [], key_point="T_K" if c.name == "T_range_K" else "P_MPa", key_min="T_min_K" if c.name == "T_range_K" else "P_min_MPa", key_max="T_max_K" if c.name == "T_range_K" else "P_max_MPa"):
                 return 1.0 * weight
-            if meta.get("T_K") is None and meta.get("P_MPa") is None:
-                return -0.1 * weight
-            return -0.5 * weight
-
+            return -0.3 * weight
         if c.ctype == "enum":
-            val = str(meta.get(c.name, "")).lower()
-            return (1.0 if val == str(c.value).lower() else -0.3) * weight
-
+            return (1.0 if str(meta.get(c.name, "")).lower() == str(c.value).lower() else -0.3) * weight
         if c.ctype == "set":
             values = c.value or []
-            if not values:
-                return 0.0
             hits = 0
             for v in values:
-                if c.name == "targets":
-                    key = f"has_{str(v)}"
-                else:
-                    key = f"gas_{str(v).lower()}"
+                key = f"has_{str(v)}" if c.name == "targets" else f"gas_{str(v).lower()}"
                 if meta.get(key):
                     hits += 1
-            if not hits:
-                return -0.2 * weight
-            return (hits / max(len(values), 1)) * weight
-
+            return ((hits / max(len(values), 1)) if hits else -0.2) * weight
         if c.ctype == "text":
-            text = str(meta.get(c.name) or "").lower()
-            return (0.5 if str(c.value).lower() in text else 0.0) * weight
-
+            return (0.5 if str(c.value).lower() in str(meta.get(c.name) or "").lower() else 0.0) * weight
         return 0.0
 
     def _apply_diversity(self, docs: List[Document]) -> List[Document]:
         if not docs or self.max_per_source <= 0:
             return docs
         counts: Dict[str, int] = {}
-        output: List[Document] = []
+        out: List[Document] = []
         for d in docs:
             src = str((d.metadata or {}).get("source_file", "unknown"))
-            counts.setdefault(src, 0)
-            if counts[src] >= self.max_per_source:
+            if counts.get(src, 0) >= self.max_per_source:
                 continue
-            counts[src] += 1
-            output.append(d)
-        return output
+            counts[src] = counts.get(src, 0) + 1
+            out.append(d)
+        return out

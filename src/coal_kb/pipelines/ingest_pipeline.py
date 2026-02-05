@@ -19,7 +19,6 @@ from ..chunking.splitter import split_docs_markdown_hierarchical_semantic
 from ..chunking.sectioner import is_reference_like
 from ..loaders import detect_language, load_any
 from ..loaders.pdf_loader import PDFLoader
-from ..ingestion.stages import Chunker, DocumentLoader, SourceScanner
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
 from ..parsing.table_extractor import TableExtractor
@@ -320,8 +319,18 @@ class IngestPipeline:
         include_exts_cfg = getattr(self.cfg.ingestion, "include_exts", ["pdf"])
         include_exts = {ext.lower().lstrip(".") for ext in include_exts_cfg}
         exclude_exts = {ext.lower().lstrip(".") for ext in self.cfg.ingestion.exclude_exts}
-        scanner = SourceScanner(include_exts=include_exts, exclude_exts=exclude_exts)
-        current_files: Dict[str, Path] = scanner.scan((raw_pdf_dir, raw_docs_dir))
+        current_files: Dict[str, Path] = {}
+        for base_dir in (raw_pdf_dir, raw_docs_dir):
+            if not base_dir.exists():
+                continue
+            for path in sorted(base_dir.rglob("*")):
+                if not path.is_file():
+                    continue
+                ext = path.suffix.lower().lstrip(".")
+                if ext in exclude_exts:
+                    continue
+                if ext and ext in include_exts:
+                    current_files[str(path.resolve())] = path
         logger.info(
             "Stage: manifest_load_scan | docs=%d | elapsed=%.2fs",
             len(current_files),
@@ -420,8 +429,10 @@ class IngestPipeline:
                     parsed_pages += len(cached)
                     continue
             try:
-                loader = DocumentLoader(pdf_loader=PDFLoader(self.cfg.pdf_markdown))
-                docs = loader.load(file_path)
+                if ext == "pdf":
+                    docs = PDFLoader(self.cfg.pdf_markdown).load(str(file_path))
+                else:
+                    docs = load_any(str(file_path))
             except Exception as e:
                 logger.warning("Failed to parse document: %s error=%s", file_path, e)
                 docs = []
@@ -565,7 +576,7 @@ class IngestPipeline:
             )
         else:
             if strategy == "markdown_hierarchical_semantic" or has_markdown:
-                chunks = Chunker(self.cfg.chunking).split(page_docs)
+                chunks = split_docs_markdown_hierarchical_semantic(page_docs, self.cfg.chunking.model_dump())
             else:
                 profile_by_section = {
                     key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()

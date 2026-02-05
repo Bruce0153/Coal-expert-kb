@@ -4,7 +4,7 @@ import argparse
 import logging
 
 from coal_kb.logging import setup_logging
-from coal_kb.pipelines.record_pipeline import RecordPipeline
+from coal_kb.knowledge_extraction.records import KnowledgeExtractor
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
 from coal_kb.embeddings.factory import EmbeddingsConfig
@@ -52,8 +52,8 @@ def main() -> None:
     if args.llm and llm_provider == "none":
         llm_provider = cfg.llm.provider
 
-    pipe = RecordPipeline(cfg=cfg, enable_llm_records=args.llm, llm_provider=llm_provider)
-    stats = pipe.run(docs)
+    extractor = KnowledgeExtractor(cfg=cfg)
+    stats = extractor.extract_records(docs, enable_llm=args.llm, llm_provider=llm_provider)
     print(stats)
 
 

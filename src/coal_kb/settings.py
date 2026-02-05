@@ -31,6 +31,15 @@ class ChunkingProfile(BaseModel):
 
 
 class ChunkingConfig(BaseModel):
+    strategy: str = "markdown_hierarchical_semantic"
+    max_parent_tokens: int = 1200
+    max_child_tokens: int = 300
+    overlap_tokens: int = 60
+    similarity_threshold: float = 0.72
+    heading_max_depth: int = 4
+    embedding_backend: str = "local_st"  # local_st | existing_factory
+
+    # legacy fallback options
     chunk_size: int = 900
     chunk_overlap: int = 120
     profile_by_section: dict[str, ChunkingProfile] = Field(

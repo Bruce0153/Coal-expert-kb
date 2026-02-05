@@ -172,6 +172,7 @@ class ExpertRetriever:
         filtered, score_map = self._soft_rank(expanded, plan.soft_constraints)
         final_docs = self._post_rank(plan.query_text, filtered)[: self.k]
 
+        final_docs = self._apply_diversity(filtered)[: self.k]
         if trace is not None:
             trace["stage1_parent_hits"] = len(parents)
             trace["stage1_parent_ids"] = parent_ids[:8]

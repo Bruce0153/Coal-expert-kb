@@ -12,6 +12,7 @@ from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
 from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
+from coal_kb.retrieval.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
@@ -92,6 +93,11 @@ def main() -> None:
     print_banner("Coal KB Eval", f"backend={cfg.backend}")
 
     backend = cfg.backend
+    if backend not in {"elastic", "chroma", "both"}:
+        raise ValueError(f"Unsupported backend: {backend}")
+
+    k = int(args.k or cfg.retrieval.k)
+
     vector_factory = None
     if backend in {"chroma", "both"}:
         store = ChromaStore(
@@ -101,6 +107,7 @@ def main() -> None:
             embedding_model=cfg.embedding.model_name,
         )
         vector_factory = store.as_retriever
+
     if backend in {"elastic", "both"}:
         elastic_store = ElasticStore(
             host=cfg.elastic.host,
@@ -108,11 +115,12 @@ def main() -> None:
             timeout_s=cfg.elastic.timeout_s,
         )
         index_name = args.index or cfg.elastic.alias_current
+        # ✅ only k candidates
         vector_factory = make_elastic_retriever_factory(
             client=elastic_store.client,
             index=index_name,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            candidates=cfg.retrieval.candidates,
+            candidates=k,
             rrf_k=cfg.retrieval.rrf_k,
             use_icu=cfg.elastic.enable_icu_analyzer,
         )
@@ -120,15 +128,15 @@ def main() -> None:
     if vector_factory is None:
         raise RuntimeError("No retriever factory configured.")
 
-    k = args.k or cfg.retrieval.k
+    rerank_enabled = bool(cfg.retrieval.rerank_enabled)
+    reranker = make_reranker(cfg) if rerank_enabled else None
+
     retriever = ExpertRetriever(
         vector_retriever_factory=vector_factory,
         k=k,
-        rerank_enabled=cfg.retrieval.rerank_enabled,
-        rerank_model=cfg.retrieval.rerank_model,
+        rerank_enabled=rerank_enabled,
         rerank_top_n=cfg.retrieval.rerank_top_n,
-        rerank_candidates=cfg.retrieval.candidates,
-        rerank_device=cfg.retrieval.rerank_device,
+        reranker=reranker,
         max_per_source=cfg.retrieval.max_per_source,
         max_relax_steps=cfg.retrieval.max_relax_steps,
         range_expand_schedule=cfg.retrieval.range_expand_schedule,
@@ -155,6 +163,7 @@ def main() -> None:
     schema_hash = stable_chunk_id(Path("configs/schema.yaml").read_text(encoding="utf-8"))[:8]
     registry = RegistrySQLite(cfg.registry.sqlite_path)
     index_name = args.index or cfg.elastic.alias_current
+
     doc_count = 0
     if backend in {"elastic", "both"}:
         elastic_store = ElasticStore(
@@ -163,6 +172,7 @@ def main() -> None:
             timeout_s=cfg.elastic.timeout_s,
         )
         doc_count = int(elastic_store.client.count(index=index_name).get("count", 0))
+
     registry.log_run_metrics(
         run_id=run_id,
         index_name=index_name,

@@ -16,12 +16,12 @@ class PathsConfig(BaseModel):
     interim_dir: str = "data/interim"
     artifacts_dir: str = "data/artifacts"
     chroma_dir: str = "storage/chroma_db"
-    sqlite_path: str = "storage/expert.db"
+    sqlite_path: str = "storage/expert.db"  # records db
     manifest_path: str = "storage/manifest.json"
 
 
-# Local embedding (fallback): e.g., HuggingFace bge-m3
 class LocalEmbeddingConfig(BaseModel):
+    # Local embedding (fallback): e.g., HuggingFace bge-m3
     model_name: str = "BAAI/bge-m3"
 
 
@@ -49,28 +49,43 @@ class ChromaConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
+    # ✅ only k (no candidates)
     k: int = 5
-    candidates: int = 50
+
     rrf_k: int = 60
     max_per_source: int = 2
     max_relax_steps: int = 2
     range_expand_schedule: list[float] = Field(default_factory=lambda: [0.05, 0.1, 0.2])
     mode: str = "balanced"
+
     rerank_enabled: bool = True
+    # local fallback (only used if API rerank not available)
     rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_top_n: int = 50
+    rerank_top_n: int = 10
     rerank_device: str = "auto"
+
     drop_sections: list[str] = Field(
         default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
     )
     drop_reference_like: bool = True
 
 
+class RerankConfig(BaseModel):
+    # Default: DashScope(OpenAI-compatible) qwen3-rerank
+    provider: str = "dashscope"
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key_env: str = "DASHSCOPE_API_KEY"
+    model: str = "qwen3-rerank"
+    timeout: int = 60
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
+
 class RegistryConfig(BaseModel):
-    sqlite_path: str = "storage/kb.db"
+    sqlite_path: str = "storage/kb.db"  # registry db (runs/query logs)
+
 
 class ElasticConfig(BaseModel):
     host: str = "http://localhost:9200"
@@ -104,30 +119,22 @@ class IngestionConfig(BaseModel):
     )
     exclude_exts: list[str] = Field(default_factory=list)
 
+
 class TenancyConfig(BaseModel):
     enabled: bool = False
     default_tenant_id: str = "default"
     enforce_tenant_filter: bool = True
 
+
 class ModelVersionsConfig(BaseModel):
+    # Used for index/version bookkeeping (especially with ES index.py build)
     embedding_version: str = "v1"
+
 
 class QueryRewriteConfig(BaseModel):
     enable_llm: bool = False
 
-class TenancyConfig(BaseModel):
-    enabled: bool = False
-    default_tenant_id: str = "default"
-    enforce_tenant_filter: bool = True
 
-class IngestCleanConfig(BaseModel):
-    drop_sections: list[str] = Field(
-        default_factory=lambda: ["references", "acknowledgements", "contents", "appendix"]
-    )
-    drop_unknown_reference_like: bool = True
-
-
-# DashScope / OpenAI-compatible Chat LLM config
 class LLMConfig(BaseModel):
     provider: str = "dashscope"
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -137,25 +144,25 @@ class LLMConfig(BaseModel):
     timeout: int = 60
 
 
-# DashScope / OpenAI-compatible Embeddings config
 class RemoteEmbeddingsConfig(BaseModel):
     provider: str = "dashscope"
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     api_key_env: str = "DASHSCOPE_API_KEY"
-    model: str = "text-embedding-v4"
+    model: str = "text-embedding-v3"
     dimensions: Optional[int] = 1024
 
 
 class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
-    # Keep this for local fallback embeddings (HF/SentenceTransformers)
     embedding: LocalEmbeddingConfig = Field(default_factory=LocalEmbeddingConfig)
+    rerank: RerankConfig = Field(default_factory=RerankConfig)
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
     backend: str = "elastic"
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
     model_versions: ModelVersionsConfig = Field(default_factory=ModelVersionsConfig)
@@ -164,7 +171,6 @@ class AppConfig(BaseModel):
     query_rewrite: QueryRewriteConfig = Field(default_factory=QueryRewriteConfig)
     tenancy: TenancyConfig = Field(default_factory=TenancyConfig)
 
-    # NEW: LLM + remote embeddings (DashScope/OpenAI-compatible)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     embeddings: RemoteEmbeddingsConfig = Field(default_factory=RemoteEmbeddingsConfig)
 
@@ -177,13 +183,11 @@ class EnvSettings(BaseSettings):
 
     config: str = "configs/app.yaml"
 
-    # Existing overrides
     embed_model: Optional[str] = None
     chroma_dir: Optional[str] = None
     sqlite_path: Optional[str] = None
     log_level: Optional[str] = None
 
-    # Optional overrides (useful but not required)
     llm_model: Optional[str] = None
     emb_model: Optional[str] = None
 
@@ -227,7 +231,6 @@ def load_config() -> AppConfig:
     if env.log_level:
         cfg.logging.level = env.log_level
 
-    # Optional overrides
     if env.llm_model:
         cfg.llm.model = env.llm_model
     if env.emb_model:

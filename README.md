@@ -1,169 +1,114 @@
-# Coal Expert KB — Expert Knowledge Base for Coal Pyrolysis & Gasification  
+# Coal Expert KB — Expert Knowledge Base for Coal Pyrolysis & Gasification
 **RAG + Expert Metadata + Structured Records + (Optional) LoRA/QLoRA**
 
-Coal Expert KB builds an **auditable, metadata-aware expert knowledge base** from scientific PDFs on coal pyrolysis/gasification, with special focus on **pollutant formation** under different operating conditions:
+Coal Expert KB builds an **auditable, metadata-aware expert knowledge base** from scientific PDFs and documents on coal pyrolysis/gasification, with special focus on **pollutant formation** under different operating conditions.
 
 - **Nitrogen pollutants**: NH₃, HCN, NOx  
 - **Sulfur pollutants**: H₂S, SO₂, COS  
 - **Aromatics / phenolics**: benzene, phenol, etc.
 
 This repository is designed for two end goals:
-1) **Expert retrieval & QA**: “Filter by operating conditions, then answer with evidence.”  
-2) **Trainable datasets**: extract structured `ExperimentRecord`s for downstream modeling (deep learning prediction, LoRA extraction models, etc.)
 
-> Works with **Alibaba Cloud Bailian / DashScope (OpenAI-compatible mode)** out of the box via LangChain.
+1) **Expert retrieval & QA**: “Filter by operating conditions, then answer with evidence.”  
+2) **Trainable datasets**: extract structured `ExperimentRecord`s for downstream modeling (prediction, LoRA extraction models, etc.)
+
+> Out of the box, the default config uses **Alibaba Cloud Bailian / DashScope (OpenAI-compatible mode)** via LangChain for embeddings/LLM.
 
 ---
 
 ## Contents
 
-- [Why this project](#why-this-project)
-- [What you get](#what-you-get)
-- [Architecture](#architecture)
-- [Quickstart](#quickstart)
+- [What this repo does](#what-this-repo-does)
+- [How it works](#how-it-works)
+- [Quickstart (first-time user)](#quickstart-first-time-user)
+- [Choose a backend: Elasticsearch vs Chroma](#choose-a-backend-elasticsearch-vs-chroma)
 - [DashScope / Bailian setup](#dashscope--bailian-setup)
+- [Core commands](#core-commands)
 - [Configuration guide](#configuration-guide)
-- [Pipelines & workflows](#pipelines--workflows)
-- [Evidence & metadata design](#evidence--metadata-design)
 - [Structured records (SQLite)](#structured-records-sqlite)
-- [LoRA/QLoRA fine-tuning (shortest path)](#loraqlora-fine-tuning-shortest-path)
+- [Evaluation](#evaluation)
 - [Project structure](#project-structure)
-- [Code walkthrough](#code-walkthrough)
-- [Runbook (end-to-end)](#runbook-end-to-end)
-- [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
-- [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## Why this project
+## What this repo does
 
-A plain “chat with PDFs” vector DB is not enough for scientific work because you need:
+A plain “chat with PDFs” vector DB is usually not enough for scientific work. This repo adds:
 
-1) **Hard filtering by operating conditions**  
-   Example: “steam gasification, 1200–1400 K, 2–3 MPa, NH₃ + HCN” should narrow results **reliably**.
+1) **Constraint-aware retrieval (hard + soft filters)**
+   - Example query: “steam gasification, 1200–1400 K, 2–3 MPa, NH₃ + HCN”
+   - The system tries to **reliably narrow** results by stage/gas/targets/T/P and still returns useful evidence when metadata is missing.
 
-2) **Auditability**  
-   Every extracted condition/value should trace back to a **PDF chunk** (and ideally page), so you can verify quickly.
+2) **Auditability**
+   - Extracted fields can attach evidence spans/snippets so you can verify quickly.
+   - Each retrieved chunk includes file/page/section for citation.
 
-3) **Trainable structured outputs**  
-   If you want predictive models or LoRA extractors, you need **clean records**, **unit normalization**, and **conflict tracking**.
-
----
-
-## What you get
-
-### 1) RAG retrieval with expert filters
-- Filter fields (examples):
-  - `stage`: pyrolysis / gasification / coupled
-  - `gas_agent`: steam / O₂ / air / CO₂ / …
-  - `targets`: NH₃, HCN, NOx, H₂S, SO₂, COS, benzene, phenol, …
-  - `T_range_K`, `P_range_MPa` + overlap checks
-  - optional `coal_name` matching
-- Ranking:
-  - vector similarity candidates
-  - optional BM25 candidate rerank + RRF fusion (stable for chemical symbols/units)
-
-### 2) Expert metadata extraction (rule-first + optional LLM)
-- Rule-first extraction (fast, deterministic):
-  - temperature/pressure **single + range**
-  - ratios (S/C, ER, O/C, …)
-  - targets detection + stage/gas normalization
-- Evidence artifacts:
-  - `meta_confidence`: field → confidence score
-  - `meta_evidence`: field → evidence snippet/span
-- Optional LLM augmentation (**provider-agnostic injection**):
-  - fill missing fields only (conservative merge)
-  - cost control: only call LLM when key fields are too missing
-
-### 3) Structured records in SQLite (`ExperimentRecord`)
-- Store trainable records in `storage/expert.db`
-- Track:
-  - unit normalization (when safe)
-  - evidence quote
-  - conflicts (same operating signature, inconsistent outputs)
-
-### 4) Optional LoRA/QLoRA extraction model
-- Build supervision pairs: `chunk text → strict JSON records`
-- Train small instruct models for consistent extraction at lower cost
+3) **Structured, trainable outputs**
+   - Extract `ExperimentRecord`s with normalization and conflict tracking.
+   - Export clean CSV/JSONL for modeling or fine-tuning.
 
 ---
 
-## Architecture
+## How it works
 
 ```text
-PDFs (data/raw_pdfs/)
+PDFs / Docs (data/raw_pdfs/, data/raw_docs/)
    │
-   ├─► Parse pages (pdf_loader) + clean text
+   ├─► Parse (PDF -> pages cache) + clean text
    │
-   ├─► Chunking (splitter + sectioner)
+   ├─► Chunking (section-aware splitter)
    │
    ├─► Metadata extraction
-   │     ├─ rules: range/ratio/targets/stage + evidence spans
-   │     └─ optional LLM augmentation (DashScope/OpenAI-compatible)
+   │     ├─ rules: range/ratio/targets/stage + normalization
+   │     └─ optional LLM augmentation (fill missing only)
    │
-   ├─► Vector DB (Chroma)  ──► Retrieval (filters + ranking) ──► Evidence-first QA
+   ├─► Indexing backend
+   │     ├─ Elasticsearch (recommended)  OR
+   │     └─ Chroma (local fallback)
    │
-   └─► Record extraction ──► SQLite (records + evidence + conflicts) ──► Export CSV/JSON
+   ├─► Retrieval (filters + ranking: vector + optional BM25 + soft constraints)
+   │
+   └─► (Optional) QA generation with citations (RAG)
+         + (Optional) Record extraction → SQLite → Export datasets
 ```
 
-Storage:
-- **Chroma** persistence: `storage/chroma_db/`
-- **SQLite** records DB: `storage/expert.db`
-- **SQLite** registry DB: `storage/kb.db` (documents/chunks/models/query logs)
-- **Elasticsearch** (optional): index data under Docker volume `elasticsearch_data`
+Storage (default paths; configurable in `configs/app.yaml`):
+
+- **Pages cache**: `data/interim/`
+- **Registry DB** (runs/documents/chunks/query logs): `storage/kb.db`
+- **Records DB** (`ExperimentRecord`s): `storage/expert.db`
+- **Chroma** persistence (when backend=chroma/both): `storage/chroma_db/`
+- **Elasticsearch** data (when using docker compose): docker volume `elasticsearch_data`
 
 ---
 
-## Quickstart
+## Quickstart (first-time user)
 
-### 1) Requirements
+### 0) Requirements
+
 - Python 3.10+ recommended
 - macOS / Linux / WSL supported
+- (If using Elasticsearch locally) Docker + docker compose
 
-### 2) Install
+### 1) Install
 
 ```bash
 pip install -e .[dev]
 pytest -q
 ```
 
-If you plan to use **DashScope/Bailian** (recommended for LLM + embeddings):
+If you plan to use DashScope/Bailian for embeddings/LLM (recommended):
 
 ```bash
 pip install -U langchain-openai openai python-dotenv
 ```
 
-### 2.5) (Optional) Start Elasticsearch + Kibana
+### 2) Add documents
 
-For local development (no security):
-
-```bash
-docker compose up -d
-```
-
-Verify Elasticsearch:
-
-```bash
-curl -s http://localhost:9200 | jq .
-```
-
-Stop services:
-
-```bash
-docker compose down
-```
-
-Remove data volumes:
-
-```bash
-docker compose down -v
-```
-
-### 3) Add documents
-Put documents under:
+Put your PDFs/docs under:
 
 ```text
 data/raw_pdfs/
@@ -171,165 +116,166 @@ data/raw_docs/
 ```
 
 Supported formats: pdf, txt, md, html, docx, pptx, csv, xlsx, json, jsonl.
-Optional loaders (html/docx/pptx/xlsx) require extras: `pip install .[docs]`.
 
-### 4) Configure (`configs/app.yaml`)
-You can use:
-- **remote embeddings** via DashScope (`embeddings:` section) ✅ recommended
-- **local embeddings** fallback (HF `bge-m3`) via `embedding:` section
+> Optional loaders (html/docx/pptx/xlsx) may require extras: `pip install -e .[docs]`.
 
-See [Configuration guide](#configuration-guide).
+### 3) Configure API key (DashScope/Bailian)
 
-### 5) Ingest into Elasticsearch (default)
-
-```bash
-python scripts/ingest.py
-```
-
-If the manifest detects an embeddings/chunking/schema mismatch, you will be prompted to rebuild:
-
-```bash
-python scripts/ingest.py --rebuild
-```
-
-To force ingestion without rebuilding (not recommended):
-
-```bash
-python scripts/ingest.py --force
-```
-
-Optional: enable table extraction (Camelot):
-
-```bash
-pip install camelot-py
-python scripts/ingest.py --tables --table-flavor lattice
-```
-
-Optional: enable LLM metadata augmentation (**LLM is configured in app.yaml**):
-
-```bash
-python scripts/ingest.py --llm-metadata
-```
-
-By default, low-value sections (references/acknowledgements/appendix/contents) are **not** indexed.
-This keeps reference lists out of retrieval results.
-
-### 5.1) Ingest into Chroma (fallback)
-
-Set `backend: chroma` in `configs/app.yaml`, then rebuild:
-
-```bash
-rm -rf storage/chroma_db
-python scripts/ingest.py --rebuild
-```
-
-### 6) Ask questions (RAG)
-
-```bash
-python scripts/ask.py
-```
-
-Example queries:
-- `steam CO2 gasification NH3 HCN 1200K 2MPa`
-- `在蒸汽气化条件下 NH3 和 HCN 的生成趋势？给证据`
-- `热解 800C 酚类 生成机理`
-
-Optional: LLM-grounded answer generation (still cites evidence):
-
-```bash
-python scripts/ask.py --llm
-```
-
-Mechanism-style queries are automatically expanded with academic terms (rule-based by default).
-
-### 6.1) Switch backend at query time
-
-```bash
-python scripts/ask.py --backend chroma
-python scripts/ask.py --backend elastic
-python scripts/ask.py --backend both
-```
-
-### 6.2) Elastic-first workflow (recommended)
-
-```bash
-# 1) Start Elastic + Kibana
-docker compose up -d
-
-# 2) Set API key for embeddings
-export DASHSCOPE_API_KEY=sk-xxxxxxxx
-
-# 3) Build index (v1)
-python scripts/index.py build --embedding-version v1
-
-# 4) Inspect indices & aliases
-curl -s "http://localhost:9200/_cat/indices?v"
-curl -s "http://localhost:9200/_cat/aliases?v"
-
-# 5) Ask questions
-python scripts/ask.py --backend elastic --mode balanced
-
-# 6) Validate index health
-python scripts/validate_index.py --index coal_kb_chunks_current
-
-# 7) Evaluate retrieval + log metrics
-python scripts/eval.py --gold data/eval/eval_set.jsonl
-
-# 8) Build new version (v2) and rollback if needed
-python scripts/index.py build --embedding-version v2
-python scripts/index.py rollback
-
-# 9) Evaluate retrieval (ad-hoc metrics)
-python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
-```
-
-### 6.3) Adaptive constraint-aware retrieval (overview)
-
-The system treats operating conditions as **soft constraints** by default. It prefers evidence
-matching temperatures/pressures/gas targets but still returns useful evidence when metadata
-is missing. Use `--mode strict|balanced|broad` to tune how aggressively constraints are applied.
-
-### 7) Extract structured records into SQLite
-
-```bash
-python scripts/extract_records.py --limit 300
-```
-
-Optional (LLM extraction):
-
-```bash
-python scripts/extract_records.py --llm --limit 300
-```
-
-### 8) Export records
-
-```bash
-python scripts/export_records.py --out data/artifacts/records.csv
-```
-
----
-
-## DashScope / Bailian setup
-
-This repo supports **Alibaba Cloud Bailian (DashScope)** via **OpenAI-compatible mode**.
-
-### 1) Set API key
-
-Create `.env` in project root:
+Create `.env` at repo root:
 
 ```env
 DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
-Or export it in your shell:
+(Optional) Or export it in your shell:
 
 ```bash
 export DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
-### 2) Use the compatible base URL
+### 4) Start Elasticsearch (recommended backend)
 
-In `configs/app.yaml`, use:
+```bash
+docker compose up -d
+curl -s http://localhost:9200
+```
+
+### 5) Build a clean, versioned index (recommended for first run)
+
+```bash
+python scripts/index.py build --embedding-version v1
+```
+
+Why this is recommended:
+- creates a new index name with version + schema hash
+- ingests **from scratch**
+- validates the index
+- switches `alias_current` only after validation
+
+### 6) Ask questions
+
+```bash
+python scripts/ask.py --backend elastic --mode balanced
+```
+
+## Example queries (for experiments)
+
+下面这些 query 专门用来做实验：验证 **ontology 解析（stage / gas_agent / pollutants）**、温度/压力范围解析、strict/broad 模式差异、以及 rerank 的影响。
+
+~~~bash
+# 推荐先用 elastic（默认开启rerank，可过滤字段更强）
+python scripts/ask.py --backend elastic --mode balanced
+
+# 对比模式（同一批 queries 分别跑一遍）
+# python scripts/ask.py --backend elastic --mode strict
+# python scripts/ask.py --backend elastic --mode broad
+
+# 可选：开启 LLM answer（检索不变，回答方式变）
+# python scripts/ask.py --backend elastic --mode balanced --llm
+~~~
+
+### A) Baseline（无显式约束：看语义召回）
+- NH3 formation mechanism in coal gasification (with evidence)
+- HCN formation pathways in coal pyrolysis (cite pages/sections)
+- 氮氧化物 形成机理 与 NH3/HCN 的关系（给证据）
+
+### B) Stage + Pollutant（验证 stage / pollutant 解析）
+- 气化 NH3 生成机理
+- 热解 HCN 生成来源
+- combustion NOx 形成（证据）
+- ignition NOx 前驱体（NH3/HCN）证据
+
+### C) Stage + Gas agent + Pollutant（验证 gas_agent 解析）
+- 蒸汽 气化 NH3 HCN
+- H2O gasification ammonia NH3
+- CO2 气化 氰化氢 HCN
+- carbon dioxide gasification HCN
+- air combustion NOx
+- 氮气 气化 NH3（对比惰性气氛）
+
+### D) 加温度范围（验证 1100-1300K / 800-950°C 等解析）
+- 蒸汽 气化 NH3 1100-1300K
+- CO2 气化 HCN 1200-1400K
+- 热解 HCN 800-950°C
+- pyrolysis phenols 600-900 C
+- combustion NOx 900-1200K
+
+### E) 加压力范围（验证 MPa 区间解析）
+- 加压 气化 蒸汽 NH3 2-3 MPa
+- CO2 气化 HCN 0.5-2 MPa
+- steam gasification NH3 1 MPa 1200K
+
+### F) 对比型问题（更贴近论文检索：看证据质量 + 多样性）
+- 蒸汽气化 vs CO2气化：NH3 与 HCN 的差异与证据对比
+- 温度升高（1100→1400K）对 NH3/HCN 哪个更敏感？请给证据
+- 热解与气化阶段：phenols 与 benzene 的生成差异（引用证据）
+
+### G) “严格措辞”压力测试（更容易触发 hard constraint）
+- 只考虑 蒸汽 气化，温度必须 1200-1400K，目标 NH3 和 HCN
+- 必须是 CO2 气化，压力 2-3 MPa，关注 HCN
+- 只看 热解，不要 气化：HCN 的来源证据
+
+> 实验建议：
+> 1) 同一组 queries 跑 strict/balanced/broad，观察召回与约束满足度变化  
+> 2) 开/关 rerank 对比 top-3 证据质量  
+> 3) 记录 ask.py 输出的 “解析到的约束” 与 “Retrieval trace” 做实验日志
+
+Enable LLM answer generation (still evidence-grounded):
+
+```bash
+python scripts/ask.py --backend elastic --llm
+```
+
+---
+
+## Choose a backend: Elasticsearch vs Chroma
+
+This repo supports three modes via `configs/app.yaml` → `backend`:
+
+- `elastic` (default, recommended)
+- `chroma` (local fallback)
+- `both` (index into both; can retrieve from both)
+
+### Elasticsearch (`backend: elastic`) — recommended
+
+Pros:
+- robust filtering at scale
+- index versioning + aliases (`*_current`, `*_prev`)
+- good observability (Kibana)
+
+Typical workflow:
+- **First run / major changes**: `python scripts/index.py build --embedding-version vX`
+- **Daily incremental updates**: `python scripts/ingest.py`
+
+> Important: `python scripts/ingest.py` (when backend=elastic) is an *ingestion tool* and does **not** perform the strict “build → validate → switch alias” lifecycle that `index.py build` performs. For production-like usage, use `index.py build` at least once.
+
+### Chroma (`backend: chroma`) — local fallback
+
+Pros:
+- simplest local setup (no ES)
+
+Usage:
+1) Set `backend: chroma` in `configs/app.yaml`
+2) Rebuild & ingest:
+
+```bash
+rm -rf storage/chroma_db storage/manifest.json
+python scripts/ingest.py --rebuild
+```
+
+### Both (`backend: both`)
+
+- Ingest writes to both Chroma and Elasticsearch.
+- Query-time retrieval can fuse results (RRF).
+- Good for debugging/ablation.
+
+---
+
+## DashScope / Bailian setup
+
+This repo supports Alibaba Cloud Bailian (DashScope) via **OpenAI-compatible mode**.
+
+In `configs/app.yaml` (defaults shown):
 
 ```yaml
 llm:
@@ -348,211 +294,175 @@ embeddings:
   dimensions: 1024
 ```
 
-### 3) 10-second smoke test (recommended)
+### 10-second smoke tests (recommended)
 
-One-liner test for embeddings:
-
-```bash
-python -c "import os; from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings; cfg=EmbeddingsConfig(provider='dashscope', base_url='https://dashscope.aliyuncs.com/compatible-mode/v1', api_key_env='DASHSCOPE_API_KEY', model='text-embedding-v4', dimensions=1024); emb=make_embeddings(cfg); v=emb.embed_query('NH3 HCN formation'); print('dim=', len(v))"
-```
-
-One-liner test for chat LLM:
+Embeddings:
 
 ```bash
-python -c "import os; from coal_kb.llm.factory import LLMConfig, make_chat_llm; cfg=LLMConfig(provider='dashscope', base_url='https://dashscope.aliyuncs.com/compatible-mode/v1', api_key_env='DASHSCOPE_API_KEY', model='qwen-plus', temperature=0, timeout=60); llm=make_chat_llm(cfg); print(llm.invoke('你是谁？').content)"
+python -c "from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings; cfg=EmbeddingsConfig(provider='dashscope', base_url='https://dashscope.aliyuncs.com/compatible-mode/v1', api_key_env='DASHSCOPE_API_KEY', model='text-embedding-v4', dimensions=1024); emb=make_embeddings(cfg); v=emb.embed_query('NH3 HCN formation'); print('dim=', len(v))"
 ```
+
+Chat LLM:
+
+```bash
+python -c "from coal_kb.llm.factory import LLMConfig, make_chat_llm; cfg=LLMConfig(provider='dashscope', base_url='https://dashscope.aliyuncs.com/compatible-mode/v1', api_key_env='DASHSCOPE_API_KEY', model='qwen-plus', temperature=0, timeout=60); llm=make_chat_llm(cfg); print(llm.invoke('用一句话解释煤气化。').content)"
+```
+
+---
+
+## Core commands
+
+### 1) Ingest (`scripts/ingest.py`)
+
+```bash
+python scripts/ingest.py
+```
+
+Options:
+
+- `--rebuild`  
+  Clears `storage/manifest.json` and rebuilds from scratch.  
+  (Note: rebuild also clears `storage/chroma_db/` even if you are using elastic-only; safe but surprising.)
+
+- `--force`  
+  Continue even if some batches fail, or if you intentionally want to bypass certain safety checks (not recommended).
+
+- `--tables` / `--table-flavor`  
+  Enable PDF table extraction (requires `camelot-py`).
+
+- `--llm-metadata`  
+  Enable LLM augmentation for metadata extraction (fills missing fields only).
+
+**Important: manifest signature mismatch**
+- If you change `configs/app.yaml` in a way that changes embedding/chunking/schema signatures, ingestion will **stop with an error** and tell you to use `--rebuild` or `--force`.
+- This is intentional to avoid mixing stale embeddings/chunks.
+
+### 2) Build ES index (versioned & validated) (`scripts/index.py`)
+
+Recommended for:
+- first-time setup
+- changing embedding model/dimensions
+- changing schema or chunking significantly
+- “clean rebuild” to avoid incremental drift
+
+```bash
+python scripts/index.py build --embedding-version v1
+```
+
+Other commands:
+
+```bash
+python scripts/index.py rollback
+python scripts/index.py switch --index <full_index_name>
+```
+
+### 3) Ask (`scripts/ask.py`)
+
+```bash
+python scripts/ask.py --backend elastic --mode balanced
+```
+
+Useful flags:
+- `--llm` enable answer generation (requires `llm` config)
+- `--rerank` enable reranking (can also be enabled in config)
+- `--mode strict|balanced|broad` adjust constraint strictness
+- `--k` override top-k
+
+### 4) Validate ES index (optional but recommended after big changes)
+
+If your repo includes `scripts/validate_index.py`, run it after build:
+
+```bash
+python scripts/validate_index.py --index coal_kb_chunks_current
+```
+
+(If you don’t have the script in your checkout, you can still verify via `/_cat/indices` and a simple search query in Kibana.)
 
 ---
 
 ## Configuration guide
 
-### `configs/app.yaml` (overview)
+Main config: `configs/app.yaml`.
 
-Sections you will typically edit:
+Common edits:
 
-- `paths`: where PDFs / outputs / DBs are stored
-- `chunking`: chunk size and overlap
-- `chunking.profile_by_section`: section-aware chunking profiles
-- `chroma.collection_name`: Chroma collection name
-- `embedding` (**local fallback**): e.g., `BAAI/bge-m3`
-- `embeddings` (**remote**): DashScope/OpenAI-compatible embeddings
-- `llm`: DashScope/OpenAI-compatible chat model
-- `backend`: `elastic` | `chroma` | `both` (default: `elastic`)
-- `registry.sqlite_path`: registry DB path (defaults to `storage/kb.db`)
-- `model_versions.embedding_version`: index version label (e.g., `v1`)
-- `elastic`: Elasticsearch settings + aliases
-- `ingestion`: drop low-value sections during ingest
-- `retrieval`: reranker, diversity (max_per_source), and reference filtering
-- `query_rewrite`: lightweight query expansion (optional LLM)
-- `tenancy`: multi-tenant defaults and enforcement
+- `paths.*`: where PDFs/outputs/DBs are stored
+- `backend`: `elastic` | `chroma` | `both`
+- `chunking.*`: chunk size/overlap + `profile_by_section`
+- `retrieval.*`: k/candidates/rerank/diversity/max_relax_steps/mode
+- `elastic.*`: host, index prefix, aliases, bulk chunk size, ICU analyzer
+- `model_versions.embedding_version`: label used for ES index naming
+- `llm.*` and `embeddings.*`: DashScope/OpenAI-compatible provider config
 
-> **Important:** if you change embedding backend/model (e.g., from local to DashScope), you must **rebuild Chroma**:
->
-> ```bash
-> rm -rf storage/chroma_db
-> python scripts/ingest.py
-> ```
+### When you MUST rebuild
 
-If you are using Elasticsearch, rebuild to create a fresh index for a new embedding version:
+You should rebuild if you change any of:
+- embeddings model or dimensions
+- chunking sizes/profiles
+- schema ontology (`configs/schema.yaml`)
+
+Rebuild (Elastic, recommended):
 
 ```bash
 python scripts/index.py build --embedding-version v2
 ```
 
-### Local vs remote embeddings
-
-- `embedding:` (singular)  
-  Local fallback embeddings (e.g. HuggingFace `bge-m3`). Requires `langchain-huggingface` + `sentence-transformers`.
-
-- `embeddings:` (plural)  
-  Remote embeddings (DashScope/OpenAI-compatible). Requires `langchain-openai` + key + base_url.
-
-Recommended: start with **remote DashScope embeddings** to keep deployment simple.
-
----
-
-## Pipelines & workflows
-
-### Ingest (`scripts/ingest.py`)
-Inputs: `data/raw_pdfs/*.pdf`  
-Outputs:
-- Chroma DB: `storage/chroma_db/`
-- Enriched chunk metadata: stored as Chroma metadata
-- Registry DB: `storage/kb.db`
-- Elasticsearch index (optional): `coal_kb_chunks_*` + aliases
-
-Key options:
-- `--tables`: optional table extraction
-- `--llm-metadata`: enable LLM metadata augmentation (reads `cfg.llm`)
-
-Default cleaning:
-- drop sections: `references`, `acknowledgements`, `contents`, `appendix`
-- drop unknown chunks that look like reference lists
-
-### Ask (`scripts/ask.py`)
-Inputs: user query  
-Outputs: evidence list (and optional LLM answer)
-
-Key options:
-- `--llm`: enable LLM answer generation (reads `cfg.llm`)
-- `--backend`: `chroma` | `elastic` | `both`
-
-Query rewrite:
-- mechanism queries (e.g., “生成机理 / formation mechanism”) are expanded with academic terms
-
-### Index versioning (`scripts/index.py`)
-Manage Elasticsearch index versions and aliases.
-
-Examples:
+Rebuild (Chroma):
 
 ```bash
-# Build a new index + ingest (elastic backend)
-python scripts/index.py build --embedding-version v2
-
-# Switch alias_current to a specific index
-python scripts/index.py switch --index coal_kb_chunks__embv2__schemaXXXX__202401011230
-
-# Roll back alias_current to alias_prev
-python scripts/index.py rollback
+rm -rf storage/chroma_db storage/manifest.json
+python scripts/ingest.py --rebuild
 ```
-
-### Inspect Elasticsearch chunks
-
-```bash
-curl -s "http://localhost:9200/coal_kb_chunks_current/_search?q=source_file:*.pdf&size=2" | jq .
-```
-
-You can also use Kibana → Discover (index pattern: `coal_kb_chunks_*`).
-
-### Retrieval evaluation (`scripts/eval_retrieval.py`)
-
-Gold format (JSONL):
-
-```json
-{"query":"steam gasification NH3 1200K","expected_sources":[{"source_file":"example.pdf","page":3}],"expected_stage":"gasification"}
-```
-
-Run evaluation:
-
-```bash
-python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl
-```
-
-Metrics include Recall@K, FilterPrecision@K, Diversity@K, and ReferencesHit@K.
-
-### Extract records (`scripts/extract_records.py`)
-Inputs: chunks (from Chroma)  
-Outputs: `storage/expert.db` with structured `ExperimentRecord`s
-
-Key options:
-- `--llm`: enable LLM extraction (reads `cfg.llm`)
-
-### Export (`scripts/export_records.py`)
-Outputs: `data/artifacts/*.csv` for modeling / analysis
-
----
-
-## Evidence & metadata design
-
-Each chunk stored in Chroma carries metadata such as:
-- `source_file`, `page`, `chunk_id`, `section`
-- `stage`, `gas_agent`, `targets`
-- `T_K`, `T_range_K`, `T_min_K`, `T_max_K`
-- `P_MPa`, `P_range_MPa`, `P_min_MPa`, `P_max_MPa`
-- `ratios` dict
-
-And two audit fields:
-- `meta_confidence`: `{ field: score }`
-- `meta_evidence`: `{ field: {start,end,evidence_text,...} }`
-
-LLM augmentation (if enabled) follows strict rules:
-- only fill missing fields
-- never overwrite numeric fields if already extracted (anti-hallucination)
-- record a low-confidence marker for LLM-added fields
 
 ---
 
 ## Structured records (SQLite)
 
-SQLite DB: `storage/expert.db`
+Record extraction writes to: `storage/expert.db`
 
-A record typically contains:
-- operating condition signature (stable hash)
-- normalized condition fields (stage, gas agent, coal name, T/P, ratios)
-- pollutant outputs (value + unit + basis)
+### Extract records
+
+```bash
+python scripts/extract_records.py --limit 300
+```
+
+Enable LLM extraction (more accurate but costs money):
+
+```bash
+python scripts/extract_records.py --llm --limit 300
+```
+
+### Export records
+
+```bash
+python scripts/export_records.py --out data/artifacts/records.csv
+```
+
+What you get:
+- normalized operating condition fields (stage/gas/T/P/ratios/coal_name)
+- pollutant outputs (value + unit + basis when available)
 - evidence quote/snippet
-- conflict flags if inconsistent outputs appear under same signature
-
-Export for training:
-- `python scripts/export_records.py --out data/artifacts/records.csv`
+- conflict flags if inconsistent outputs appear under the same signature
 
 ---
 
-## LoRA/QLoRA fine-tuning (shortest path)
+## Evaluation
 
-### 1) Create curated pairs (JSONL)
+Two common evaluation entrypoints:
 
-```json
-{"instruction":"Extract ExperimentRecord JSON array. Output strict JSON only. No fabrication.","input":"<chunk text>","output":"[{...}]"}
-```
-
-### 2) Train QLoRA
-Install training deps:
+### 1) End-to-end eval (`scripts/eval.py`)
 
 ```bash
-pip install -U "trl[peft]" datasets accelerate transformers peft bitsandbytes
+python scripts/eval.py --gold data/eval/eval_set.jsonl
 ```
 
-Train:
+### 2) Retrieval-focused eval (`scripts/eval_retrieval.py`)
 
 ```bash
-python scripts/train_lora_record_extractor.py   --model Qwen/Qwen2.5-1.5B-Instruct   --train data/artifacts/lora_train.jsonl   --val data/artifacts/lora_val.jsonl   --out data/artifacts/lora_adapter
+python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl --k 5
 ```
 
-Evaluate:
-- JSON parse rate
-- field-level precision/recall
-- numeric relative error for normalized values
+Metrics typically include Recall@K, FilterPrecision@K, Diversity@K, and ReferencesHit@K.
 
 ---
 
@@ -560,178 +470,81 @@ Evaluate:
 
 ```text
 coal-expert-kb/
-  README.md
   configs/
     app.yaml
     schema.yaml
     prompts/
   data/
     raw_pdfs/
+    raw_docs/
     interim/
     artifacts/
   storage/
-    chroma_db/
-    expert.db
+    chroma_db/      # when backend=chroma/both
+    kb.db           # registry
+    expert.db       # ExperimentRecord
+    manifest.json
   src/
     coal_kb/
       settings.py
-      llm/
-        factory.py
-      embeddings/
-        factory.py
+      pipelines/
       parsing/
       chunking/
       metadata/
       retrieval/
-      qa/
       store/
-      pipelines/
+      qa/
   scripts/
     ingest.py
+    index.py
     ask.py
     extract_records.py
     export_records.py
+    eval.py
+    eval_retrieval.py
   tests/
-```
-
----
-
-## Code walkthrough
-
-This is a high-level map of how the code fits together, with the key inputs/outputs for each module.
-
-### Core pipeline flow
-
-1) **Parsing & cleaning** → `coal_kb/parsing/`
-   - `pdf_loader.py`: loads PDFs into page-level `Document`s and strips common header/footer noise.
-   - `table_extractor.py`: optional Camelot-based table extraction (yields table docs).
-
-2) **Chunking** → `coal_kb/chunking/`
-   - `splitter.py`: splits pages into chunks, preserves metadata.
-   - `sectioner.py`: heuristically tags sections (methods/results/…).
-
-3) **Metadata extraction** → `coal_kb/metadata/`
-   - `extract.py`: rule-first extraction of T/P ranges, ratios, coal names, etc.
-   - `normalize.py`: ontology-based normalization for stage/gas/targets.
-   - `evidence.py`: evidence spans + confidence for auditing.
-
-4) **Vectorstore & retrieval** → `coal_kb/store/` + `coal_kb/retrieval/`
-   - `chroma_store.py`: wraps Chroma and embeddings.
-   - `filter_parser.py`: parses query filters (stage/gas/T/P/targets).
-   - `retriever.py`: hybrid retrieval (vector + BM25 + RRF + post-filters).
-
-5) **QA & records** → `coal_kb/qa/` + `coal_kb/pipelines/record_pipeline.py`
-   - `rag_answer.py`: evidence-only output or LLM-based answer w/ citations.
-   - `record_pipeline.py`: LLM extraction → normalize → conflict check → SQLite.
-
-6) **Config & schema** → `coal_kb/settings.py` + `coal_kb/schema/`
-   - Central config loading, schema models, validators, and unit conversions.
-
----
-
-## Runbook (end-to-end)
-
-This is a concrete, repeatable run sequence. Adjust paths and API keys as needed.
-
-### 0) Install
-
-```bash
-pip install -e .[dev]
-```
-
-If you plan to use remote LLM/embeddings (DashScope/OpenAI-compatible):
-
-```bash
-pip install -U langchain-openai openai python-dotenv
-```
-
-### 1) Configure
-
-Edit `configs/app.yaml`:
-- `paths` → data/storage locations
-- `llm` → DashScope/OpenAI-compatible chat model
-- `embeddings` → remote embedding model
-
-Create `.env`:
-
-```env
-DASHSCOPE_API_KEY=sk-xxxx
-```
-
-### 2) Ingest PDFs
-
-```bash
-python scripts/ingest.py
-```
-
-Manifest checks (embeddings/chunking/schema) are automatic:
-- Use `--rebuild` to clear the KB and re-ingest when signatures change.
-- Use `--force` to ingest anyway (not recommended).
-
-Optional table extraction:
-
-```bash
-python scripts/ingest.py --tables --table-flavor lattice
-```
-
-### 3) Ask questions
-
-```bash
-python scripts/ask.py
-```
-
-LLM-enabled answers:
-
-```bash
-python scripts/ask.py --llm
-```
-
-### 4) Extract structured records
-
-```bash
-python scripts/extract_records.py --llm --limit 300
-```
-
-### 5) Export for modeling
-
-```bash
-python scripts/export_records.py --out data/artifacts/records.csv
-```
-
-
-## Testing
-
-```bash
-pytest -q
-```
-
-### Retrieval eval
-
-```bash
-python scripts/eval_retrieval.py --gold data/eval/retrieval_gold.jsonl --k 5
 ```
 
 ---
 
 ## Troubleshooting
 
-### “My embeddings/LLM settings don’t take effect”
-- Confirm `configs/app.yaml` includes `llm:` and `embeddings:` sections
-- Confirm `.env` contains `DASHSCOPE_API_KEY`
-- Run the smoke tests in [DashScope / Bailian setup](#dashscope--bailian-setup)
+### 1) “Manifest signature mismatch detected”
+Cause: you changed embeddings/chunking/schema since the last ingest.
 
-### “Chroma retrieval looks wrong after changing embedding model”
-Rebuild Chroma:
+Fix (recommended):
 
 ```bash
-rm -rf storage/chroma_db
-python scripts/ingest.py
+python scripts/index.py build --embedding-version vX
 ```
 
-### LLM cost control
-- Prefer rule-only ingest first (no `--llm-metadata`)
-- Enable LLM augmentation only on missing-heavy chunks (default behavior)
-- Consider restricting LLM augmentation to `methods/results/table` sections (roadmap)
+Or if you are using Chroma:
+
+```bash
+rm -rf storage/chroma_db storage/manifest.json
+python scripts/ingest.py --rebuild
+```
+
+### 2) “Elasticsearch is not reachable”
+- Ensure `docker compose up -d` is running.
+- Confirm `configs/app.yaml` has correct `elastic.host` (default `http://localhost:9200`).
+
+### 3) “Embedding dimensions mismatch / mapping errors”
+- Ensure `embeddings.dimensions` matches the real output dimension (run the smoke test).
+- Rebuild ES index via `python scripts/index.py build --embedding-version vX`.
+
+### 4) Chroma retrieval got worse after switching embedding model
+Rebuild Chroma (old vectors are incompatible):
+
+```bash
+rm -rf storage/chroma_db storage/manifest.json
+python scripts/ingest.py --rebuild
+```
+
+### 5) LLM cost control
+- Start with rule-only ingest: don’t pass `--llm-metadata`.
+- Enable LLM only when needed: `--llm-metadata` and/or `ask.py --llm`.
+- Prefer `--mode balanced` (strict may drop useful evidence when metadata is missing).
 
 ---
 
@@ -739,33 +552,20 @@ python scripts/ingest.py
 
 - Stronger section detection (Methods/Results/Table) to reduce LLM calls
 - Better evidence span alignment for LLM-filled fields
-- Table-first extraction (for pollutant numbers and conditions)
+- Table-first extraction (for pollutant numbers and operating conditions)
 - Schema-constrained decoding for strict JSON extraction
 - Active learning loop: conflicts → human review → curated pairs → retrain LoRA
 
 ---
 
-## Contributing
-
-PRs and issues are welcome:
-- add ontology aliases (`configs/schema.yaml`)
-- improve regex patterns (ratios/ranges)
-- add unit conversions & basis normalization
-- improve sectioner/table extraction
-- add evaluation metrics for extraction quality
-
----
-
 ## License
 
-MIT or Apache-2.0
+MIT or Apache-2.0 (choose one and keep it consistent)
+
 ### Elasticsearch ICU analyzer (optional)
 
-For better Chinese BM25, install the ICU plugin and enable `elastic.enable_icu_analyzer: true`:
+If you enable `elastic.enable_icu_analyzer: true`, make sure your Elasticsearch has the ICU plugin installed. Otherwise index creation may fail.
 
-```bash
-bin/elasticsearch-plugin install analysis-icu
-```
-
-Then rebuild the index with `python scripts/index.py build --embedding-version v1`.
-If the plugin is missing, index creation will fail with an actionable error.
+For local dev via docker compose, you can either:
+- disable ICU analyzer in config, or
+- install the plugin in the ES image and rebuild the index.

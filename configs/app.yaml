@@ -4,11 +4,14 @@ paths:
   interim_dir: "data/interim"
   artifacts_dir: "data/artifacts"
   chroma_dir: "storage/chroma_db"
-  sqlite_path: "storage/expert.db"
+  records_db_path: "storage/expert.db"
   manifest_path: "storage/manifest.json"
 
 embedding:
   model_name: "BAAI/bge-m3"
+
+model_versions:
+  embedding_version: "v1"
 
 chunking:
   chunk_size: 900
@@ -32,22 +35,6 @@ chunking:
 
 chroma:
   collection_name: "coal_gasification_papers"
-
-retrieval:
-  k: 10
-  candidates: 50
-  rrf_k: 60
-  max_per_source: 2
-  rerank_enabled: true
-  rerank_model: "BAAI/bge-reranker-base"
-  rerank_top_n: 50
-  rerank_device: "auto"
-  drop_sections:
-    - references
-    - acknowledgements
-    - contents
-    - appendix
-  drop_reference_like: true
 
 logging:
   level: "INFO"
@@ -80,12 +67,9 @@ tenancy:
   enforce_tenant_filter: true
 
 registry:
-  sqlite_path: "storage/kb.db"
+  registry_db_path: "storage/kb.db"
 
 backend: "elastic"
-
-model_versions:
-  embedding_version: "v1"
 
 ingest_clean:
   drop_sections:
@@ -94,6 +78,29 @@ ingest_clean:
     - contents
     - appendix
   drop_unknown_reference_like: true
+
+retrieval:
+  k: 10
+  rrf_k: 60
+  max_per_source: 2
+  max_relax_steps: 2
+  range_expand_schedule: [0.05, 0.1, 0.2]
+  mode: "balanced"
+
+  rerank_enabled: true
+  rerank_top_n: 5
+
+# local fallback (only used if API rerank is not available)
+  rerank_model: "BAAI/bge-reranker-base"
+  rerank_device: "auto"
+
+
+rerank:
+  provider: dashscope
+  base_url: "https://dashscope.aliyuncs.com/compatible-api/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+  model: "qwen3-rerank"
+  timeout: 60
 
 llm:
   provider: dashscope
@@ -107,5 +114,5 @@ embeddings:
   provider: dashscope
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   api_key_env: "DASHSCOPE_API_KEY"
-  model: "text-embedding-v4"
+  model: "text-embedding-v3"
   dimensions: 1024

@@ -4,19 +4,20 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from coal_kb.chunking.sectioner import is_reference_like
 from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
+from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.query_rewrite import rewrite_query
+from coal_kb.retrieval.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
 from coal_kb.settings import load_config
 from coal_kb.store.chroma_store import ChromaStore
 from coal_kb.store.elastic_store import ElasticStore
-from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 
 
 @dataclass
@@ -56,7 +57,14 @@ def match_gold(gold: Dict[str, Any], meta: Dict[str, Any]) -> bool:
     return bool(source_file)
 
 
-def range_overlap(meta: Dict[str, Any], query_range: Optional[List[float]], *, key_point: str, key_min: str, key_max: str) -> bool:
+def range_overlap(
+    meta: Dict[str, Any],
+    query_range: Optional[List[float]],
+    *,
+    key_point: str,
+    key_min: str,
+    key_max: str,
+) -> bool:
     if query_range is None:
         return True
     qlo, qhi = float(query_range[0]), float(query_range[1])
@@ -90,15 +98,16 @@ def filter_match(meta: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, bool
 
     P_range = parsed.get("P_range_MPa")
     if P_range:
-        checks["P_range_MPa"] = range_overlap(meta, P_range, key_point="P_MPa", key_min="P_min_MPa", key_max="P_max_MPa")
+        checks["P_range_MPa"] = range_overlap(
+            meta, P_range, key_point="P_MPa", key_min="P_min_MPa", key_max="P_max_MPa"
+        )
 
     return checks
 
 
 def recall_at_k(docs: List[Dict[str, Any]], gold_sources: List[Dict[str, Any]], k: int) -> bool:
     for d in docs[:k]:
-        meta = d
-        if any(match_gold(g, meta) for g in gold_sources):
+        if any(match_gold(g, d) for g in gold_sources):
             return True
     return False
 
@@ -132,6 +141,9 @@ def main() -> None:
     if backend not in {"elastic", "chroma", "both"}:
         raise ValueError(f"Unsupported backend: {backend}")
 
+    # ✅ only k candidates are retrieved
+    k = int(args.k)
+
     vector_factory = None
     if backend in {"chroma", "both"}:
         store = ChromaStore(
@@ -152,19 +164,23 @@ def main() -> None:
             client=elastic_store.client,
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            candidates=cfg.retrieval.candidates,
+            candidates=k,
             rrf_k=cfg.retrieval.rrf_k,
             use_icu=cfg.elastic.enable_icu_analyzer,
         )
 
+    if vector_factory is None:
+        raise RuntimeError("No retriever factory configured.")
+
+    rerank_enabled = bool(cfg.retrieval.rerank_enabled)
+    reranker = make_reranker(cfg) if rerank_enabled else None
+
     expert = ExpertRetriever(
         vector_retriever_factory=vector_factory,
-        k=args.k,
-        rerank_enabled=cfg.retrieval.rerank_enabled,
-        rerank_model=cfg.retrieval.rerank_model,
+        k=k,
+        rerank_enabled=rerank_enabled,
         rerank_top_n=cfg.retrieval.rerank_top_n,
-        rerank_candidates=cfg.retrieval.candidates,
-        rerank_device=cfg.retrieval.rerank_device,
+        reranker=reranker,
         max_per_source=cfg.retrieval.max_per_source,
         max_relax_steps=cfg.retrieval.max_relax_steps,
         range_expand_schedule=cfg.retrieval.range_expand_schedule,
@@ -186,21 +202,22 @@ def main() -> None:
         parsed = parser_.parse(item.query)
         query_text = item.query
         if not args.no_rewrite:
-            rewrite = rewrite_query(item.query)
-            query_text = rewrite.query
+            rw = rewrite_query(item.query)
+            query_text = rw.query
+
         docs = expert.retrieve(query_text, parsed)
         meta_list = [d.metadata or {} for d in docs]
 
-        for k in (1, 3, 5):
-            if recall_at_k(meta_list, item.expected_sources, k):
-                recalls[k] += 1
-            precisions[k] += _filter_precision_at_k(meta_list, parsed.compat_where, k)
-            diversities[k] += len({m.get("source_file") for m in meta_list[:k] if m.get("source_file")})
+        for kk in (1, 3, 5):
+            if recall_at_k(meta_list, item.expected_sources, kk):
+                recalls[kk] += 1
+            precisions[kk] += _filter_precision_at_k(meta_list, parsed.compat_where, kk)
+            diversities[kk] += len({m.get("source_file") for m in meta_list[:kk] if m.get("source_file")})
             if any(
                 (str(m.get("section", "")).lower() == "references") or is_reference_like(docs[i].page_content or "")
-                for i, m in enumerate(meta_list[:k])
+                for i, m in enumerate(meta_list[:kk])
             ):
-                reference_hits[k] += 1
+                reference_hits[kk] += 1
 
     total = max(len(items), 1)
     rows = [

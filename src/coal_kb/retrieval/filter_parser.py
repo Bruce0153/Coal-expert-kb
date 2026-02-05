@@ -134,54 +134,6 @@ class FilterParser:
                 return stage, candidates
         return candidates[0], candidates
 
-    def _detect_stage(self, q: str) -> Tuple[str, List[str]]:
-        t = q.lower()
-        candidates: List[str] = []
-        for canonical, aliases in self.onto.stage_aliases.items():
-            if any(alias.lower() in t for alias in aliases):
-                candidates.append(canonical)
-
-        if not candidates:
-            return "unknown", []
-
-        priority = ["combustion", "ignition", "oxidation", "gasification", "pyrolysis", "coupled"]
-        for stage in priority:
-            if stage in candidates:
-                return stage, candidates
-        return candidates[0], candidates
-
-    def _detect_stage(self, q: str) -> Tuple[str, List[str]]:
-        t = q.lower()
-        candidates: List[str] = []
-        for canonical, aliases in self.onto.stage_aliases.items():
-            if any(alias.lower() in t for alias in aliases):
-                candidates.append(canonical)
-
-        if not candidates:
-            return "unknown", []
-
-        priority = ["combustion", "ignition", "oxidation", "gasification", "pyrolysis", "coupled"]
-        for stage in priority:
-            if stage in candidates:
-                return stage, candidates
-        return candidates[0], candidates
-
-    def _detect_stage(self, q: str) -> Tuple[str, List[str]]:
-        t = q.lower()
-        candidates: List[str] = []
-        for canonical, aliases in self.onto.stage_aliases.items():
-            if any(alias.lower() in t for alias in aliases):
-                candidates.append(canonical)
-
-        if not candidates:
-            return "unknown", []
-
-        priority = ["combustion", "ignition", "oxidation", "gasification", "pyrolysis", "coupled"]
-        for stage in priority:
-            if stage in candidates:
-                return stage, candidates
-        return candidates[0], candidates
-
     def _parse_temperature_range(self, q: str) -> Optional[List[float]]:
         # explicit range like "1100-1300 K"
         m = re.search(rf"{_RE_NUM}\s*[-~～]\s*{_RE_NUM}\s*K", q, re.I)

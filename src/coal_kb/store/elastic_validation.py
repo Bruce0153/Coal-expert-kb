@@ -39,6 +39,20 @@ def validate_index(
     embedding_props = props.get("embedding") or {}
     dims = embedding_props.get("dims")
 
+    required_fields = {
+        "is_parent": "boolean",
+        "parent_id": "keyword",
+        "heading_path": "keyword",
+        "chunk_level": "short",
+    }
+    for fname, ftype in required_fields.items():
+        node = props.get(fname)
+        if not node:
+            errors.append(f"missing field: {fname}")
+            continue
+        if node.get("type") != ftype:
+            errors.append(f"field type mismatch: {fname}={node.get('type')} expected={ftype}")
+
     expected = expected_dims or embeddings_cfg.dimensions
     if expected is None:
         embeddings = make_embeddings(embeddings_cfg)

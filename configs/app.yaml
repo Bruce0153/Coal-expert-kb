@@ -14,6 +14,15 @@ model_versions:
   embedding_version: "v1"
 
 chunking:
+  strategy: markdown_hierarchical_semantic
+  max_parent_tokens: 1200
+  max_child_tokens: 300
+  overlap_tokens: 60
+  similarity_threshold: 0.72
+  heading_max_depth: 4
+  embedding_backend: local_st
+
+  # legacy fallback
   chunk_size: 900
   chunk_overlap: 120
   profile_by_section:
@@ -32,6 +41,14 @@ chunking:
     unknown:
       chunk_size: 750
       chunk_overlap: 120
+
+pdf_markdown:
+  enabled: true
+  heading_max_depth: 4
+  two_column_mode: auto
+  drop_headers_footers: true
+  min_heading_font_ratio: 1.15
+
 
 chroma:
   collection_name: "coal_gasification_papers"
@@ -86,6 +103,14 @@ retrieval:
   max_relax_steps: 2
   range_expand_schedule: [0.05, 0.1, 0.2]
   mode: "balanced"
+  two_stage:
+    enabled: true
+    parent_k_candidates: 200
+    parent_k_final: 60
+    max_parents: 60
+    child_k_candidates: 300
+    child_k_final: 30
+    allow_relax_in_stage2: true
 
   rerank_enabled: true
   rerank_top_n: 5

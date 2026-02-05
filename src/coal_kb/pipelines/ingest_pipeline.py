@@ -15,11 +15,12 @@ from tqdm import tqdm
 from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.advanced_splitter import split_page_docs_section_aware
+from ..chunking.splitter import split_docs_markdown_hierarchical_semantic
 from ..chunking.sectioner import is_reference_like
 from ..loaders import detect_language, load_any
+from ..loaders.pdf_loader import PDFLoader
 from ..metadata.extract import MetadataExtractor
 from ..metadata.normalize import Ontology, flatten_for_filtering
-from ..parsing.pdf_loader import load_pdf_pages
 from ..parsing.table_extractor import TableExtractor
 from ..settings import AppConfig
 from ..store.chroma_store import ChromaStore
@@ -51,6 +52,12 @@ _KEEP_META_KEYS = {
     "P_max_MPa",
     "coal_name",
     "ratios",
+    "is_parent",
+    "parent_id",
+    "heading_path",
+    "chunk_level",
+    "position_start",
+    "position_end",
 }
 
 
@@ -416,26 +423,24 @@ class IngestPipeline:
             if ext == "pdf":
                 cache_path = _cache_path_for_pdf(interim_dir, str(file_path))
                 cached = _load_pages_cache(cache_path)
-                if cached:  # 只有非空缓存才算命中
+                if cached:
                     page_docs.extend(cached)
                     cache_hits += 1
                     parsed_pages += len(cached)
                     continue
-                try:
-                    docs = load_pdf_pages(file_path)
-                except Exception as e:
-                    logger.warning("Failed to parse PDF: %s error=%s", file_path, e)
-                    continue
+            try:
+                if ext == "pdf":
+                    docs = PDFLoader(self.cfg.pdf_markdown).load(str(file_path))
+                else:
+                    docs = load_any(str(file_path))
+            except Exception as e:
+                logger.warning("Failed to parse document: %s error=%s", file_path, e)
+                docs = []
+            if ext == "pdf":
                 if docs:
                     _save_pages_cache(cache_path, docs)
                 else:
                     logger.warning("Parsed 0 pages; skipping PDF: %s", file_path)
-            else:
-                try:
-                    docs = load_any(str(file_path))
-                except Exception as e:
-                    logger.warning("Failed to parse document: %s error=%s", file_path, e)
-                    docs = []
             if docs:
                 doc_type = ext or "unknown"
                 parser = "pdf" if ext == "pdf" else "loader"
@@ -557,15 +562,31 @@ class IngestPipeline:
 
         # Chunk
         stage_start = time.monotonic()
-        profile_by_section = {
-            key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
-        }
-        chunks = split_page_docs_section_aware(
-            page_docs,
-            default_chunk_size=self.cfg.chunking.chunk_size,
-            default_chunk_overlap=self.cfg.chunking.chunk_overlap,
-            profile_by_section=profile_by_section,
-        )
+        strategy = self.cfg.chunking.strategy
+        has_markdown = any(str((d.metadata or {}).get("format", "")).lower() == "markdown" for d in page_docs)
+        if strategy == "legacy":
+            profile_by_section = {
+                key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
+            }
+            chunks = split_page_docs_section_aware(
+                page_docs,
+                default_chunk_size=self.cfg.chunking.chunk_size,
+                default_chunk_overlap=self.cfg.chunking.chunk_overlap,
+                profile_by_section=profile_by_section,
+            )
+        else:
+            if strategy == "markdown_hierarchical_semantic" or has_markdown:
+                chunks = split_docs_markdown_hierarchical_semantic(page_docs, self.cfg.chunking.model_dump())
+            else:
+                profile_by_section = {
+                    key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
+                }
+                chunks = split_page_docs_section_aware(
+                    page_docs,
+                    default_chunk_size=self.cfg.chunking.chunk_size,
+                    default_chunk_overlap=self.cfg.chunking.chunk_overlap,
+                    profile_by_section=profile_by_section,
+                )
         if chunks:
             avg_len = sum(len(c.page_content or "") for c in chunks) / len(chunks)
         else:
@@ -610,14 +631,25 @@ class IngestPipeline:
         chunks_with_target_flags = 0
         chunks_with_any_flags = 0
         for i, ch in enumerate(tqdm(chunks, desc="Enrich metadata")):
-            # generate chunk_id deterministically
             src = (ch.metadata or {}).get("source_file", "unknown")
             page = str((ch.metadata or {}).get("page", ""))
             section = str((ch.metadata or {}).get("section", "unknown"))
 
-            chunk_id = stable_chunk_id(src, page, section, ch.page_content[:200])
-            document_id = document_id_by_source.get(str(src), stable_chunk_id(str(src)))
             meta: Dict[str, object] = dict(ch.metadata or {})
+            heading_path = str(meta.get("heading_path") or section or "(root)")
+            pos_start = int(meta.get("position_start") or i)
+            pos_end = int(meta.get("position_end") or (i + 1))
+            stable_parent_id = stable_chunk_id(str(src), heading_path, str(pos_start))
+            is_parent = bool(meta.get("is_parent", False))
+            if is_parent:
+                chunk_id = stable_parent_id
+                parent_id = stable_parent_id
+            else:
+                parent_id = str(meta.get("parent_id") or stable_parent_id)
+                chunk_id = stable_chunk_id(parent_id, str(pos_start), ch.page_content[:200])
+            chunk_level = 0 if is_parent else 1
+
+            document_id = document_id_by_source.get(str(src), stable_chunk_id(str(src)))
 
             chunk_meta = extractor.extract(Document(page_content=ch.page_content, metadata={}))
             _merge_list_field(meta, "targets", chunk_meta.get("targets"))
@@ -650,6 +682,12 @@ class IngestPipeline:
             # attach chunk_id + canonical source/page for citations
             meta["chunk_id"] = chunk_id
             meta.setdefault("source_file", src)
+            meta["is_parent"] = is_parent
+            meta["parent_id"] = parent_id
+            meta["heading_path"] = heading_path
+            meta["chunk_level"] = chunk_level
+            meta["position_start"] = pos_start
+            meta["position_end"] = pos_end
 
             meta = _trim_metadata(meta)
             meta_for_registry = _stringify_metadata(meta)
@@ -673,6 +711,13 @@ class IngestPipeline:
                     "document_id": document_id,
                     "page": ch.metadata.get("page"),
                     "section": ch.metadata.get("section"),
+                    "is_parent": is_parent,
+                    "parent_id": parent_id,
+                    "heading_path": heading_path,
+                    "heading_path_text": heading_path,
+                    "chunk_level": chunk_level,
+                    "position_start": pos_start,
+                    "position_end": pos_end,
                     "chunk_index": i,
                     "text": ch.page_content,
                     "metadata_json": json.dumps(meta_for_registry, ensure_ascii=False),
@@ -691,6 +736,13 @@ class IngestPipeline:
                     "page": ch.metadata.get("page"),
                     "page_label": ch.metadata.get("page_label"),
                     "section": ch.metadata.get("section"),
+                    "is_parent": is_parent,
+                    "parent_id": parent_id,
+                    "heading_path": heading_path,
+                    "heading_path_text": heading_path,
+                    "chunk_level": chunk_level,
+                    "position_start": pos_start,
+                    "position_end": pos_end,
                     "chunk_index": i,
                     "text": ch.page_content,
                     "stage": meta.get("stage"),

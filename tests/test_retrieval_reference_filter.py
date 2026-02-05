@@ -81,7 +81,6 @@ def test_reference_like_filtered():
         expert = ExpertRetriever(
             vector_retriever_factory=factory,
             k=2,
-            k_candidates=5,
             drop_sections=["references"],
             drop_reference_like=True,
         )

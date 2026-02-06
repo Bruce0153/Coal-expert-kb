@@ -569,3 +569,58 @@ If you enable `elastic.enable_icu_analyzer: true`, make sure your Elasticsearch 
 For local dev via docker compose, you can either:
 - disable ICU analyzer in config, or
 - install the plugin in the ES image and rebuild the index.
+
+---
+
+## 现代 RAG 升级：QueryPlan + Planner/Executor 解耦 + ContextBuilder
+
+> 保持原有 `ingest/index/ask` 教学流程不变；以下为新增进阶路径。
+
+### 新架构（进化版）
+
+```text
+Question
+  -> QueryPlanner (理解问题+约束+重写+检索策略)
+  -> QueryPlan(JSON, 可回放)
+  -> ExpertRetriever.execute(plan) (只执行 parent->child 检索)
+  -> ContextBuilder (分组/去重/token预算/引用编号)
+  -> Answerer (引用驱动回答, 证据不足拒答)
+```
+
+详见：`docs/ARCHITECTURE.md`。
+
+### QueryPlan 字段说明与调参
+- `query.hard_constraints / soft_constraints`：stage/gas_agent/targets/T/P/coal_name/flags
+- `retrieval_steps`：两阶段（parent->child）的 `k_candidates`、`k_final`、`fusion_mode`
+- `relax_policy`：召回不足时逐步放宽（drop_fields / widen_ranges）
+- `rerank/diversity/neighbor`：精排、多样性控制、邻居扩展
+- `context`：`max_context_tokens`、`max_evidence_chunks`、dedup、按 heading 聚合
+- `answer`：引用要求、拒答阈值、输出格式
+
+推荐起步参数：
+- parent: `k_candidates=200`, `k_final=60`
+- child: `k_candidates=300`, `k_final=30`
+- relax: `max_steps=2`，range 扩展 `5% -> 10%`
+- neighbor window: `1`
+- context budget: `1500~2200 tokens`
+
+### 调试指南（系统“怎么想”）
+```bash
+python scripts/ask.py --backend elastic --show-plan
+```
+可直接看到 QueryPlan JSON，包括硬/软约束与两阶段配置。
+
+### 回放指南（trace_id）
+```bash
+python scripts/ask.py --backend elastic --show-plan --save-trace
+```
+会把 plan + 检索统计 + citations 写入 registry query log，并输出 `trace_id`，用于 badcase 复盘。
+
+### FAQ
+- 召回为 0：增大 child `k_candidates`，或开启/加强 relax_policy
+- references 命中太多：保持 `drop_reference_like=true`，并在 context 做 dedup
+- 证据重复：开启 `context.deduplicate`，并限制 `diversity.max_per_source`
+
+### 迁移与回退
+- 新模式默认由 `scripts/ask.py` 自动走 Planner->Executor->ContextBuilder->Answerer。
+- 若需回退，可在代码中直接调用 `ExpertRetriever.retrieve(query, parsed_filter)`（旧模式仍保留）。

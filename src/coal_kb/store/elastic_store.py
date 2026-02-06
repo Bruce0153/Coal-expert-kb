@@ -150,6 +150,7 @@ class ElasticStore:
         k_final: int,
         use_icu: bool = False,
         heading_boost: bool = False,
+        fusion_mode: str = "rrf",
     ) -> List[Document]:
         text_field = "text.icu" if use_icu else "text"
         filter_clauses = self._build_filters(filters)
@@ -175,26 +176,28 @@ class ElasticStore:
         ).get("hits", {}).get("hits", [])
 
         score_map: Dict[str, float] = {}
-        for r, hit in enumerate(bm25, 1):
-            score_map[hit["_id"]] = score_map.get(hit["_id"], 0.0) + 1.0 / (60 + r)
-        for r, hit in enumerate(knn, 1):
-            score_map[hit["_id"]] = score_map.get(hit["_id"], 0.0) + 1.0 / (60 + r)
+        if fusion_mode in {"rrf", "bm25"}:
+            for r, hit in enumerate(bm25, 1):
+                score_map[hit["_id"]] = score_map.get(hit["_id"], 0.0) + 1.0 / (60 + r)
+        if fusion_mode in {"rrf", "vector"}:
+            for r, hit in enumerate(knn, 1):
+                score_map[hit["_id"]] = score_map.get(hit["_id"], 0.0) + 1.0 / (60 + r)
 
         hit_map = {h["_id"]: h for h in bm25 + knn}
         ranked_ids = sorted(score_map, key=lambda x: score_map[x], reverse=True)[:k_final]
         return [self._hit_to_doc(hit_map[i]) for i in ranked_ids if i in hit_map]
 
-    def search_parents(self, *, index: str, query_embedding: List[float], query_text: str, filters: Dict[str, Any], k_candidates: int, k_final: int, use_icu: bool = False) -> List[Document]:
+    def search_parents(self, *, index: str, query_embedding: List[float], query_text: str, filters: Dict[str, Any], k_candidates: int, k_final: int, use_icu: bool = False, fusion_mode: str = "rrf") -> List[Document]:
         f = dict(filters)
         f["is_parent"] = True
         f["chunk_level"] = 0
-        return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu, heading_boost=True)
+        return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu, heading_boost=True, fusion_mode=fusion_mode)
 
-    def search_children(self, *, index: str, query_embedding: List[float], query_text: str, filters: Dict[str, Any], k_candidates: int, k_final: int, use_icu: bool = False) -> List[Document]:
+    def search_children(self, *, index: str, query_embedding: List[float], query_text: str, filters: Dict[str, Any], k_candidates: int, k_final: int, use_icu: bool = False, fusion_mode: str = "rrf") -> List[Document]:
         f = dict(filters)
         f["is_parent"] = False
         f["chunk_level"] = 1
-        return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu)
+        return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu, fusion_mode=fusion_mode)
 
     def get_parents_by_ids(self, *, index: str, parent_ids: List[str]) -> Dict[str, Document]:
         if not parent_ids:

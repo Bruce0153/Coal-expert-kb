@@ -1,0 +1,144 @@
+paths:
+  raw_pdfs_dir: "data/raw_pdfs"
+  raw_docs_dir: "data/raw_docs"
+  interim_dir: "data/interim"
+  artifacts_dir: "data/artifacts"
+  chroma_dir: "storage/chroma_db"
+  records_db_path: "storage/expert.db"
+  manifest_path: "storage/manifest.json"
+
+embedding:
+  backend: dashscope
+  model_name: "text-embedding-v3"
+
+model_versions:
+  embedding_version: "v1"
+
+chunking:
+  strategy: markdown_hierarchical_semantic
+  max_parent_tokens: 1200
+  max_child_tokens: 300
+  overlap_tokens: 60
+  similarity_threshold: 0.72
+  heading_max_depth: 4
+  embedding_backend: dashscope
+
+  # legacy fallback
+  chunk_size: 900
+  chunk_overlap: 120
+  profile_by_section:
+    results:
+      chunk_size: 900
+      chunk_overlap: 150
+    discussion:
+      chunk_size: 900
+      chunk_overlap: 150
+    methods:
+      chunk_size: 650
+      chunk_overlap: 120
+    conditions:
+      chunk_size: 650
+      chunk_overlap: 120
+    unknown:
+      chunk_size: 750
+      chunk_overlap: 120
+
+pdf_markdown:
+  enabled: true
+  heading_max_depth: 4
+  two_column_mode: auto
+  drop_headers_footers: true
+  min_heading_font_ratio: 1.15
+
+
+chroma:
+  collection_name: "coal_gasification_papers"
+
+logging:
+  level: "INFO"
+
+elastic:
+  host: "http://localhost:9200"
+  index_prefix: "coal_kb_chunks"
+  alias_current: "coal_kb_chunks_current"
+  alias_prev: "coal_kb_chunks_prev"
+  verify_certs: false
+  timeout_s: 60
+  bulk_chunk_size: 200
+  enable_icu_analyzer: true
+
+ingestion:
+  include_exts: ["pdf", "txt", "md", "docx"]
+  drop_reference_like_unknown: true
+  drop_sections:
+    - references
+    - acknowledgements
+    - contents
+    - appendix
+
+query_rewrite:
+  enable_llm: false
+
+tenancy:
+  enabled: false
+  default_tenant_id: "default"
+  enforce_tenant_filter: true
+
+registry:
+  registry_db_path: "storage/kb.db"
+
+backend: "elastic"
+
+ingest_clean:
+  drop_sections:
+    - references
+    - acknowledgements
+    - contents
+    - appendix
+  drop_unknown_reference_like: true
+
+retrieval:
+  k: 10
+  rrf_k: 60
+  max_per_source: 2
+  max_relax_steps: 2
+  range_expand_schedule: [0.05, 0.1, 0.2]
+  mode: "balanced"
+  two_stage:
+    enabled: true
+    parent_k_candidates: 200
+    parent_k_final: 60
+    max_parents: 60
+    child_k_candidates: 300
+    child_k_final: 30
+    allow_relax_in_stage2: true
+
+  rerank_enabled: true
+  rerank_top_n: 5
+
+# local fallback (only used if API rerank is not available)
+  rerank_model: "BAAI/bge-reranker-base"
+  rerank_device: "auto"
+
+
+rerank:
+  provider: dashscope
+  base_url: "https://dashscope.aliyuncs.com/compatible-api/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+  model: "qwen3-rerank"
+  timeout: 60
+
+llm:
+  provider: dashscope
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+  model: "qwen-turbo"
+  temperature: 0
+  timeout: 60
+
+embeddings:
+  provider: dashscope
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "DASHSCOPE_API_KEY"
+  model: "text-embedding-v3"
+  dimensions: 1024

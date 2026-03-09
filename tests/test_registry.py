@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from coal_kb.store.registry_sqlite import RegistrySQLite
+
+
+def test_registry_upserts_and_deletes(tmp_path: Path) -> None:
+    db_path = tmp_path / "kb.db"
+    registry = RegistrySQLite(str(db_path))
+
+    registry.upsert_document(
+        document_id="doc1",
+        source_file="a.pdf",
+        sha256="sha1",
+        mtime=123,
+        size=456,
+        status="active",
+    )
+
+    registry.upsert_chunks_bulk(
+        [
+            {
+                "chunk_id": "c1",
+                "document_id": "doc1",
+                "page": 1,
+                "section": "results",
+                "chunk_index": 0,
+                "text": "hello",
+                "metadata_json": "{}",
+                "embedding_model": "test",
+                "embedding_dim": 4,
+                "embedding_version": "v1",
+            }
+        ]
+    )
+
+    registry.log_query(
+        query="steam gasification",
+        filters={"stage": "gasification"},
+        constraints={"constraints": []},
+        top_chunk_ids=["c1"],
+        top_source_files=["a.pdf"],
+        latency_ms=12.3,
+        backend="chroma",
+        tenant_id=None,
+        embedding_version="v1",
+        rerank_enabled=True,
+        mode="balanced",
+        relax_steps=["expand_numeric_range=5%"],
+        diversity_k=1,
+    )
+
+    registry.log_run_metrics(
+        run_id="run1",
+        index_name="idx",
+        embedding_version="v1",
+        schema_hash="abc12345",
+        doc_count=10,
+        chunks=10,
+        precision_at_k=0.5,
+        recall_at_k=1.0,
+        mrr=0.8,
+    )
+
+    registry.delete_chunks_by_document_id("doc1")

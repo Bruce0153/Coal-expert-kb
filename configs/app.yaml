@@ -4,12 +4,12 @@ paths:
   interim_dir: "data/interim"
   artifacts_dir: "data/artifacts"
   chroma_dir: "storage/chroma_db"
-  records_db_path: "storage/expert.db"
+  sqlite_path: "storage/expert.db"
   manifest_path: "storage/manifest.json"
 
 embedding:
   backend: dashscope
-  model_name: "text-embedding-v3"
+  model_name: "text-embedding-v4"
 
 model_versions:
   embedding_version: "v1"
@@ -85,7 +85,7 @@ tenancy:
   enforce_tenant_filter: true
 
 registry:
-  registry_db_path: "storage/kb.db"
+  sqlite_path: "storage/kb.db"
 
 backend: "elastic"
 
@@ -132,7 +132,7 @@ llm:
   provider: dashscope
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   api_key_env: "DASHSCOPE_API_KEY"
-  model: "qwen-turbo"
+  model: "qwen-max"
   temperature: 0
   timeout: 60
 

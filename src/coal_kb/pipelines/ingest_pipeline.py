@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
-import os
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from tqdm import tqdm
-from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.advanced_splitter import split_page_docs_section_aware
 from ..chunking.splitter import split_docs_markdown_hierarchical_semantic
@@ -36,18 +35,31 @@ from ..utils.unicode_sanitize import sanitize_obj
 logger = logging.getLogger(__name__)
 
 _KEEP_META_KEYS = {
+    "source",
     "source_file",
+    "file_path",
+    "doc_id",
+    "parent_doc_id",
+    "title",
+    "doc_type",
+    "language",
+    "updated_at",
     "page",
     "page_label",
     "section",
     "chunk_id",
+    "chunk_index",
+    "char_count",
+    "token_count",
     "stage",
     "gas_agent",
     "targets",
     "T_K",
+    "T_range_K",
     "T_min_K",
     "T_max_K",
     "P_MPa",
+    "P_range_MPa",
     "P_min_MPa",
     "P_max_MPa",
     "coal_name",
@@ -71,6 +83,7 @@ def _cache_path_for_pdf(interim_dir: Path, pdf_path: str) -> Path:
     safe = stable_chunk_id(pdf_path, stamp)
     return interim_dir / f"pages_{safe}.jsonl"
 
+
 def _clean_surrogates(obj):
     # 递归清洗：dict/list/str
     if isinstance(obj, str):
@@ -80,6 +93,23 @@ def _clean_surrogates(obj):
     if isinstance(obj, dict):
         return {k: _clean_surrogates(v) for k, v in obj.items()}
     return obj
+
+
+def _estimate_token_count(text: str) -> int:
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    return max(1, len(re.findall(r"\w+|[^\w\s]", stripped, flags=re.UNICODE)))
+
+
+def _isoformat_from_ns(mtime_ns: int) -> str:
+    return datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
+def _derive_title(source_file: str, meta: Dict[str, object]) -> str:
+    title = str(meta.get("title") or "").strip()
+    return title or Path(source_file).stem
+
 
 def _save_pages_cache(cache_path: Path, docs: List[Document]) -> None:
     """
@@ -181,10 +211,6 @@ class IngestPipeline:
     enable_table_extraction: bool = False
     table_flavor: str = "lattice"
 
-    # metadata extraction
-    enable_llm_metadata: bool = False
-    llm_provider: str = "none"  # "openai"
-
     def run(
         self,
         *,
@@ -200,18 +226,7 @@ class IngestPipeline:
 
         onto = Ontology.load("configs/schema.yaml")
 
-        llm_provider = self.llm_provider
-        if self.enable_llm_metadata and llm_provider == "none":
-            llm_provider = self.cfg.llm.provider
-        provider = llm_provider if llm_provider != "none" else self.cfg.llm.provider
-        llm_cfg = LLMConfig(**{**self.cfg.llm.model_dump(), "provider": provider})
-
-        extractor = MetadataExtractor(
-            onto=onto,
-            enable_llm=self.enable_llm_metadata,
-            llm_provider=llm_provider,
-            llm_config=llm_cfg,
-        )
+        extractor = MetadataExtractor(onto=onto)
 
         if rebuild:
             shutil.rmtree(self.cfg.paths.chroma_dir, ignore_errors=True)
@@ -458,6 +473,8 @@ class IngestPipeline:
                     "doc_type": doc_type,
                     "language": lang,
                     "parser": parser,
+                    "title": file_path.stem,
+                    "updated_at": _isoformat_from_ns(stat.st_mtime_ns),
                 }
                 doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
                 language_counts[lang] = language_counts.get(lang, 0) + 1
@@ -632,7 +649,6 @@ class IngestPipeline:
         chunks_with_any_flags = 0
         for i, ch in enumerate(tqdm(chunks, desc="Enrich metadata")):
             src = (ch.metadata or {}).get("source_file", "unknown")
-            page = str((ch.metadata or {}).get("page", ""))
             section = str((ch.metadata or {}).get("section", "unknown"))
 
             meta: Dict[str, object] = dict(ch.metadata or {})
@@ -650,6 +666,7 @@ class IngestPipeline:
             chunk_level = 0 if is_parent else 1
 
             document_id = document_id_by_source.get(str(src), stable_chunk_id(str(src)))
+            source_meta = file_meta_by_path.get(str(src), {})
 
             chunk_meta = extractor.extract(Document(page_content=ch.page_content, metadata={}))
             _merge_list_field(meta, "targets", chunk_meta.get("targets"))
@@ -680,14 +697,25 @@ class IngestPipeline:
             meta = flatten_for_filtering(meta, onto)
 
             # attach chunk_id + canonical source/page for citations
+            meta["source"] = src
             meta["chunk_id"] = chunk_id
             meta.setdefault("source_file", src)
+            meta["file_path"] = str(src)
+            meta["doc_id"] = document_id
+            meta["parent_doc_id"] = document_id
+            meta["title"] = _derive_title(str(src), meta)
+            meta["doc_type"] = source_meta.get("doc_type")
+            meta["language"] = source_meta.get("language") or meta.get("language")
+            meta["updated_at"] = source_meta.get("updated_at")
             meta["is_parent"] = is_parent
             meta["parent_id"] = parent_id
             meta["heading_path"] = heading_path
             meta["chunk_level"] = chunk_level
             meta["position_start"] = pos_start
             meta["position_end"] = pos_end
+            meta["chunk_index"] = i
+            meta["char_count"] = len(ch.page_content or "")
+            meta["token_count"] = _estimate_token_count(ch.page_content or "")
 
             meta = _trim_metadata(meta)
             meta_for_registry = _stringify_metadata(meta)
@@ -732,10 +760,16 @@ class IngestPipeline:
                     "chunk_id": chunk_id,
                     "document_id": document_id,
                     "tenant_id": self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
+                    "title": meta.get("title"),
                     "source_file": meta.get("source_file"),
                     "page": ch.metadata.get("page"),
                     "page_label": ch.metadata.get("page_label"),
                     "section": ch.metadata.get("section"),
+                    "doc_id": meta.get("doc_id"),
+                    "file_path": meta.get("file_path"),
+                    "doc_type": meta.get("doc_type"),
+                    "language": meta.get("language"),
+                    "updated_at": meta.get("updated_at"),
                     "is_parent": is_parent,
                     "parent_id": parent_id,
                     "heading_path": heading_path,
@@ -744,6 +778,8 @@ class IngestPipeline:
                     "position_start": pos_start,
                     "position_end": pos_end,
                     "chunk_index": i,
+                    "char_count": meta.get("char_count"),
+                    "token_count": meta.get("token_count"),
                     "text": ch.page_content,
                     "stage": meta.get("stage"),
                     "gas_agent": meta.get("gas_agent"),

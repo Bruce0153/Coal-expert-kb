@@ -28,4 +28,4 @@ def test_answerer_with_context_package_not_crash():
     )
     pkg = ContextBuilder().build(plan, [])
     out = Answerer().answer(plan, pkg)
-    assert "无法可靠回答" in out.answer_text
+    assert "Insufficient evidence" in out.answer_text

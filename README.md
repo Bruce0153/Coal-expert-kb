@@ -137,6 +137,34 @@ This choice keeps the project easy to study and avoids unnecessary framework spr
 - diagnostics panel for retrieval and context details
 - theme toggle for presentation polish
 
+## Conversation-capable API
+
+The backend now supports conversation-oriented chat sessions instead of only single-turn asks.
+
+### Conversation model
+
+- A conversation has a `conversation_id`, title, timestamps, and ordered messages.
+- Each message has a `message_id`, `role`, `content`, and optional metadata.
+- Roles are `system`, `user`, and `assistant`.
+- Conversations are persisted in SQLite so a future chat UI can load prior threads.
+
+### Multi-turn behavior
+
+The backend does not blindly stuff full history into retrieval.
+
+Instead it:
+
+1. stores the full transcript
+2. looks at a small recent window for follow-up detection
+3. rewrites the retrieval query only when the new turn looks referential
+4. passes a compact history view to answer generation for continuity
+
+This keeps retrieval explainable while still supporting follow-up questions like:
+
+- "What about CO2 instead?"
+- "Compare that with steam gasification."
+- "And under higher pressure?"
+
 ## Repository structure
 
 ```text
@@ -159,6 +187,14 @@ src/coal_kb/
   api/
     app.py                    FastAPI app and /api/ask endpoint
     models.py                 API request / response models
+    routes_chat.py            Conversation-oriented chat routes
+  chat/
+    orchestrator.py           Multi-turn chat orchestration
+    memory.py                 Lightweight history-aware query preparation
+  conversation/
+    store.py                  SQLite-backed conversation persistence
+    service.py                Conversation lifecycle helpers
+    models.py                 Conversation and message schemas
   chunking/                   Chunking logic
   context/
     builder.py                Evidence packing and citation labeling
@@ -314,6 +350,22 @@ Then open:
 http://127.0.0.1:8000
 ```
 
+## Run the API for chat sessions
+
+Start the same server:
+
+```bash
+python scripts/serve.py --reload
+```
+
+The key endpoints for the next frontend phase are:
+
+- `POST /api/chat`
+- `POST /api/conversations`
+- `GET /api/conversations`
+- `GET /api/conversations/{conversation_id}/messages`
+- `DELETE /api/conversations/{conversation_id}`
+
 ### What the frontend calls
 
 Endpoint:
@@ -368,6 +420,34 @@ Example response shape:
 }
 ```
 
+### Chat endpoint
+
+Request:
+
+```json
+{
+  "conversation_id": null,
+  "message": "How does steam gasification affect NH3 and HCN at 1200 K?",
+  "llm": true,
+  "debug": true,
+  "k": 6,
+  "mode": "balanced",
+  "rerank": true
+}
+```
+
+Response fields now include:
+
+- `conversation_id`
+- `message_id`
+- `answer`
+- `citations`
+- `used_chunks`
+- `evidence_items`
+- `retrieval_trace_summary`
+- `evidence_sufficiency`
+- `confidence_score`
+
 ## Example workflows
 
 ### Workflow 1: ingest and ask from the CLI
@@ -391,7 +471,14 @@ Then:
 4. Read the matching evidence cards on the right.
 5. Open diagnostics if you want retrieval visibility.
 
-### Workflow 3: evidence-only behavior
+### Workflow 3: multi-turn chat via API
+
+1. `POST /api/conversations` to create a thread, or let `POST /api/chat` create one implicitly.
+2. Send the first user message to `POST /api/chat`.
+3. Reuse the returned `conversation_id` for follow-up turns.
+4. Load message history with `GET /api/conversations/{conversation_id}/messages`.
+
+### Workflow 4: evidence-only behavior
 
 If you keep LLM answering disabled, the system still returns:
 

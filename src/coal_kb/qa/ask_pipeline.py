@@ -52,12 +52,15 @@ class AskRuntime:
 @dataclass
 class AskExecution:
     query: str
+    retrieval_query: str
     plan: QueryPlan
     docs: List[Document]
     trace: Dict[str, Any]
     context_debug: Dict[str, Any]
     result: AnswerResult
     timings_ms: Dict[str, float]
+    history_used: bool = False
+    history_reason: str = "standalone_query"
 
 
 def normalize_query(query: str) -> str:
@@ -187,15 +190,25 @@ def build_runtime(
     )
 
 
-def execute_query(runtime: AskRuntime, raw_query: str, *, enable_llm: bool = False) -> AskExecution:
-    query = normalize_query(raw_query)
-    if not query:
+def execute_query(
+    runtime: AskRuntime,
+    raw_query: str,
+    *,
+    enable_llm: bool = False,
+    original_query: Optional[str] = None,
+    conversation_context: Optional[str] = None,
+    history_used: bool = False,
+    history_reason: str = "standalone_query",
+) -> AskExecution:
+    query = normalize_query(original_query or raw_query)
+    retrieval_query = normalize_query(raw_query)
+    if not retrieval_query:
         raise ValueError("query is empty")
 
     trace: Dict[str, Any] = {}
 
     started = time.monotonic()
-    plan = runtime.planner.build_plan(query, runtime.cfg, enable_llm=False, llm_config=None)
+    plan = runtime.planner.build_plan(retrieval_query, runtime.cfg, enable_llm=False, llm_config=None)
     plan_ms = (time.monotonic() - started) * 1000
 
     started = time.monotonic()
@@ -213,11 +226,13 @@ def execute_query(runtime: AskRuntime, raw_query: str, *, enable_llm: bool = Fal
         query=query,
         enable_llm=enable_llm,
         llm_config=runtime.llm_config,
+        conversation_context=conversation_context,
     )
     answer_ms = (time.monotonic() - started) * 1000
 
     return AskExecution(
         query=query,
+        retrieval_query=retrieval_query,
         plan=plan,
         docs=docs,
         trace=trace,
@@ -230,6 +245,8 @@ def execute_query(runtime: AskRuntime, raw_query: str, *, enable_llm: bool = Fal
             "answer": round(answer_ms, 2),
             "total": round(plan_ms + retrieve_ms + context_ms + answer_ms, 2),
         },
+        history_used=history_used,
+        history_reason=history_reason,
     )
 
 
@@ -283,17 +300,36 @@ def format_sources(execution: AskExecution) -> str:
     return "\n".join(lines)
 
 
+def retrieval_trace_summary(execution: AskExecution) -> Dict[str, Any]:
+    return {
+        "retrieval_query": execution.retrieval_query,
+        "history_used": execution.history_used,
+        "history_reason": execution.history_reason,
+        "vector_candidates": execution.trace.get("vector_candidates"),
+        "postfiltered_count": execution.trace.get("postfiltered_count"),
+        "source_distribution": execution.trace.get("source_distribution"),
+        "heading_distribution": execution.trace.get("heading_distribution"),
+    }
+
+
 def build_response_payload(execution: AskExecution, *, include_debug: bool = False) -> Dict[str, Any]:
     payload = {
         "query": execution.query,
+        "retrieval_query": execution.retrieval_query,
         "answer": execution.result.answer_text,
         "referenced_labels": execution.result.referenced_labels,
         "citations": ordered_citations(execution),
+        "used_chunks": execution.result.used_chunks,
+        "evidence_items": execution.result.evidence_items,
+        "retrieval_trace_summary": retrieval_trace_summary(execution),
+        "evidence_sufficiency": execution.result.evidence_sufficiency,
+        "confidence_score": execution.result.confidence_score,
         "timings_ms": execution.timings_ms,
         "diagnostics": {
             "retrieval": retrieval_diagnostics(execution),
             "context": execution.context_debug,
             "trace": execution.trace,
+            "answer_debug": execution.result.debug,
         }
         if include_debug
         else {
@@ -315,9 +351,12 @@ def log_query(runtime: AskRuntime, execution: AskExecution, *, save_trace: bool 
         constraints={
             "plan": execution.plan.to_dict(),
             "retrieval_trace": execution.trace,
+            "retrieval_trace_summary": retrieval_trace_summary(execution),
             "citations": execution.result.citations,
             "referenced_labels": execution.result.referenced_labels,
             "context_debug": execution.context_debug,
+            "evidence_sufficiency": execution.result.evidence_sufficiency,
+            "confidence_score": execution.result.confidence_score,
         }
         if save_trace
         else {"plan": execution.plan.to_dict()},

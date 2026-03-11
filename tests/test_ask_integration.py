@@ -34,6 +34,7 @@ def test_answerer_with_context_package_not_crash():
     pkg = ContextBuilder().build(_plan(), [])
     out = Answerer().answer(_plan(), pkg)
     assert "Insufficient evidence" in out.answer_text
+    assert out.evidence_sufficiency == "insufficient"
 
 
 def test_answerer_fallback_references_evidence_labels():

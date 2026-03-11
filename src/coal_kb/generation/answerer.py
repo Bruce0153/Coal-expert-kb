@@ -21,16 +21,24 @@ class AnswerResult:
     answer_text: str
     citations: Dict[str, dict]
     used_chunks: List[str]
+    evidence_items: List[dict]
     referenced_labels: List[str]
+    evidence_sufficiency: str
+    confidence_score: float
     debug: Dict[str, Any]
 
 
 def _extract_referenced_labels(answer_text: str, citations: Dict[str, dict]) -> List[str]:
-    seen = []
+    seen: List[str] = []
     for label in _CITATION_PATTERN.findall(answer_text or ""):
         if label in citations and label not in seen:
             seen.append(label)
     return seen
+
+
+def _confidence_score(*, evidence_count: int, referenced_count: int) -> float:
+    score = 0.2 + min(0.45, evidence_count * 0.12) + min(0.3, referenced_count * 0.1)
+    return round(min(score, 0.95), 2)
 
 
 def _fallback_answer(context_package: ContextPackage) -> str:
@@ -60,7 +68,7 @@ def _fallback_answer(context_package: ContextPackage) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(query: str, context_markdown: str) -> List[object]:
+def _build_prompt(query: str, context_markdown: str, conversation_context: str | None) -> List[object]:
     system_prompt = (
         "You are a retrieval-grounded assistant for a RAG system demo. "
         "Answer only from the supplied evidence catalog. "
@@ -70,8 +78,10 @@ def _build_prompt(query: str, context_markdown: str) -> List[object]:
         "Return Markdown with exactly these sections: "
         "'## Answer', '## Evidence Sufficiency', and optionally '## Notes'."
     )
+    history_block = f"Conversation context:\n{conversation_context}\n\n" if conversation_context else ""
     user_prompt = (
         f"Question:\n{query}\n\n"
+        f"{history_block}"
         "Use the evidence catalog below. Keep citations inline with each material claim.\n\n"
         f"{context_markdown}"
     )
@@ -87,9 +97,11 @@ class Answerer:
         query: Optional[str] = None,
         enable_llm: bool = False,
         llm_config: Optional[LLMConfig] = None,
+        conversation_context: Optional[str] = None,
     ) -> AnswerResult:
         evidence_count = len(context_package.used_chunks)
         citations = {key: value.model_dump() for key, value in context_package.citations.items()}
+        evidence_items = [item.model_dump() for item in context_package.evidence_items]
 
         if evidence_count < plan.answer.min_evidence:
             answer_text = (
@@ -102,14 +114,17 @@ class Answerer:
                 answer_text=answer_text,
                 citations=citations,
                 used_chunks=context_package.used_chunks,
+                evidence_items=evidence_items,
                 referenced_labels=[],
+                evidence_sufficiency="insufficient",
+                confidence_score=0.0,
                 debug={"reason": "insufficient_evidence", "evidence_count": evidence_count},
             )
 
         if enable_llm and llm_config is not None and query:
             try:
                 model = make_chat_llm(llm_config)
-                response = model.invoke(_build_prompt(query, context_package.markdown))
+                response = model.invoke(_build_prompt(query, context_package.markdown, conversation_context))
                 content = getattr(response, "content", None) or ""
                 referenced_labels = _extract_referenced_labels(content, citations)
                 if content.strip() and referenced_labels:
@@ -117,7 +132,13 @@ class Answerer:
                         answer_text=content.strip(),
                         citations=citations,
                         used_chunks=context_package.used_chunks,
+                        evidence_items=evidence_items,
                         referenced_labels=referenced_labels,
+                        evidence_sufficiency="sufficient",
+                        confidence_score=_confidence_score(
+                            evidence_count=evidence_count,
+                            referenced_count=len(referenced_labels),
+                        ),
                         debug={"mode": "llm", "context_debug": context_package.debug},
                     )
                 logger.warning("LLM answer omitted valid evidence labels; falling back to evidence-only output.")
@@ -125,11 +146,17 @@ class Answerer:
                 logger.warning("LLM answer generation failed; falling back to evidence-only output: %s", exc)
 
         answer_text = _fallback_answer(context_package)
-        referenced_labels = [citation.label for citation in context_package.evidence_items]
+        referenced_labels = [citation["label"] for citation in evidence_items]
         return AnswerResult(
             answer_text=answer_text,
             citations=citations,
             used_chunks=context_package.used_chunks,
+            evidence_items=evidence_items,
             referenced_labels=referenced_labels,
+            evidence_sufficiency="sufficient",
+            confidence_score=_confidence_score(
+                evidence_count=evidence_count,
+                referenced_count=len(referenced_labels),
+            ),
             debug={"mode": "fallback", "context_debug": context_package.debug},
         )

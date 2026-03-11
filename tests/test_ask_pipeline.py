@@ -62,6 +62,7 @@ def test_build_response_payload_orders_referenced_labels_first():
     }
     execution = AskExecution(
         query="q",
+        retrieval_query="q with history",
         plan=_plan(),
         docs=[],
         trace={},
@@ -70,11 +71,17 @@ def test_build_response_payload_orders_referenced_labels_first():
             answer_text="Claim [E2]",
             citations=citations,
             used_chunks=["c1", "c2"],
+            evidence_items=list(citations.values()),
             referenced_labels=["E2"],
+            evidence_sufficiency="sufficient",
+            confidence_score=0.67,
             debug={},
         ),
         timings_ms={"total": 1.0},
+        history_used=True,
+        history_reason="follow_up_rewrite",
     )
     payload = build_response_payload(execution)
     assert payload["citations"][0]["label"] == "E2"
     assert payload["citations"][0]["referenced_in_answer"] is True
+    assert payload["retrieval_trace_summary"]["history_used"] is True

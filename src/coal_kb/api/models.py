@@ -45,6 +45,24 @@ class CitationResponse(BaseModel):
     referenced_in_answer: bool = False
 
 
+class ClaimResponse(BaseModel):
+    claim_id: str
+    text: str
+    citations: List[str] = Field(default_factory=list)
+    support: str = "direct"
+
+
+class SourceCardResponse(BaseModel):
+    source_id: str
+    source_file: str
+    title: str
+    pages: List[int] = Field(default_factory=list)
+    headings: List[str] = Field(default_factory=list)
+    evidence_labels: List[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    snippet_preview: str = ""
+
+
 class ConversationSummaryResponse(BaseModel):
     conversation_id: str
     title: str
@@ -67,9 +85,12 @@ class AskResponse(BaseModel):
     retrieval_query: str
     answer: str
     referenced_labels: List[str] = Field(default_factory=list)
+    rendered_citations: List[str] = Field(default_factory=list)
     citations: List[CitationResponse] = Field(default_factory=list)
     used_chunks: List[str] = Field(default_factory=list)
     evidence_items: List[Dict[str, Any]] = Field(default_factory=list)
+    source_cards: List[SourceCardResponse] = Field(default_factory=list)
+    claim_items: List[ClaimResponse] = Field(default_factory=list)
     retrieval_trace_summary: Dict[str, Any] = Field(default_factory=dict)
     evidence_sufficiency: str = "insufficient"
     confidence_score: float = 0.0

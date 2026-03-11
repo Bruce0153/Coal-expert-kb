@@ -10,7 +10,9 @@ from coal_kb.qa.ask_pipeline import (
     HELP_TEXT,
     build_runtime,
     execute_query,
+    format_claims,
     format_debug_info,
+    format_source_cards,
     format_sources,
     log_query,
     parse_command,
@@ -62,14 +64,24 @@ def _run_query(runtime, question: str, *, enable_llm: bool, show_plan: bool, deb
     print("\nAnswer:")
     print(execution.result.answer_text)
 
+    if execution.result.claim_items:
+        print("\nClaim Map:")
+        print(format_claims(execution))
+
     if execution.result.citations:
         print("\nEvidence Catalog:")
         print(format_sources(execution))
+
+    if execution.result.source_cards:
+        print("\nSource Cards:")
+        print(format_source_cards(execution))
 
     print_stats_table(
         "Query Stats",
         [
             ("docs", str(len(execution.docs))),
+            ("evidence_sufficiency", execution.result.evidence_sufficiency),
+            ("confidence", f"{execution.result.confidence_score:.2f}"),
             ("plan_ms", f"{execution.timings_ms['plan']:.2f}"),
             ("retrieve_ms", f"{execution.timings_ms['retrieve']:.2f}"),
             ("context_ms", f"{execution.timings_ms['context']:.2f}"),

@@ -45,7 +45,7 @@ def test_chat_orchestrator_returns_conversation_capable_response(tmp_path, monke
     def fake_execute_query(*args, **kwargs):
         return AskExecution(
             query="What about CO2 instead?",
-            retrieval_query=kwargs.get("raw_query", "What about CO2 instead?") if "raw_query" in kwargs else args[1],
+            retrieval_query=args[1],
             plan=_plan(),
             docs=[],
             trace={},
@@ -62,6 +62,7 @@ def test_chat_orchestrator_returns_conversation_capable_response(tmp_path, monke
                         "chunk_id": "c1",
                         "snippet": "CO2 example",
                         "source_display": "paper.pdf | page 2 | Results",
+                        "source_id": "paper|paper.pdf",
                     }
                 },
                 used_chunks=["c1"],
@@ -75,10 +76,25 @@ def test_chat_orchestrator_returns_conversation_capable_response(tmp_path, monke
                         "chunk_id": "c1",
                         "snippet": "CO2 example",
                         "source_display": "paper.pdf | page 2 | Results",
+                        "source_id": "paper|paper.pdf",
                     }
                 ],
+                source_cards=[
+                    {
+                        "source_id": "paper|paper.pdf",
+                        "source_file": "paper.pdf",
+                        "title": "paper.pdf",
+                        "pages": [2],
+                        "headings": ["Results"],
+                        "evidence_labels": ["E1"],
+                        "evidence_count": 1,
+                        "snippet_preview": "CO2 example",
+                    }
+                ],
+                claim_items=[{"claim_id": "C1", "text": "CO2 shifts the condition set.", "citations": ["E1"], "support": "direct"}],
+                rendered_citations=["[E1] paper.pdf | page 2 | Results"],
                 referenced_labels=["E1"],
-                evidence_sufficiency="sufficient",
+                evidence_sufficiency="limited",
                 confidence_score=0.7,
                 debug={},
             ),
@@ -101,3 +117,4 @@ def test_chat_orchestrator_returns_conversation_capable_response(tmp_path, monke
     assert second.response["conversation_id"] == first.conversation.conversation_id
     assert second.response["message_id"]
     assert second.response["retrieval_trace_summary"]["history_used"] is True
+    assert second.response["claim_items"][0]["citations"] == ["E1"]

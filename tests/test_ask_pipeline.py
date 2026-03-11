@@ -49,6 +49,7 @@ def test_build_response_payload_orders_referenced_labels_first():
             chunk_id="c1",
             snippet="A",
             source_display="paper-a.pdf | page 1 | Results",
+            source_id="Paper A|paper-a.pdf",
         ).model_dump(),
         "E2": CitationItem(
             label="E2",
@@ -58,6 +59,7 @@ def test_build_response_payload_orders_referenced_labels_first():
             chunk_id="c2",
             snippet="B",
             source_display="paper-b.pdf | page 2 | Discussion",
+            source_id="Paper B|paper-b.pdf",
         ).model_dump(),
     }
     execution = AskExecution(
@@ -72,8 +74,11 @@ def test_build_response_payload_orders_referenced_labels_first():
             citations=citations,
             used_chunks=["c1", "c2"],
             evidence_items=list(citations.values()),
+            source_cards=[{"source_file": "paper-a.pdf"}, {"source_file": "paper-b.pdf"}],
+            claim_items=[{"claim_id": "C1", "text": "Claim", "citations": ["E2"], "support": "direct"}],
+            rendered_citations=["[E2] paper-b.pdf | page 2 | Discussion"],
             referenced_labels=["E2"],
-            evidence_sufficiency="sufficient",
+            evidence_sufficiency="grounded",
             confidence_score=0.67,
             debug={},
         ),
@@ -85,3 +90,5 @@ def test_build_response_payload_orders_referenced_labels_first():
     assert payload["citations"][0]["label"] == "E2"
     assert payload["citations"][0]["referenced_in_answer"] is True
     assert payload["retrieval_trace_summary"]["history_used"] is True
+    assert payload["claim_items"][0]["citations"] == ["E2"]
+    assert payload["rendered_citations"][0].startswith("[E2]")

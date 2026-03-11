@@ -39,4 +39,15 @@ def test_context_builder_budget_and_stable_citations():
     assert len(pkg.used_chunks) == 2
     assert list(pkg.citations.keys()) == ["E1", "E2"]
     assert pkg.evidence_items[0].source_display.startswith("a.pdf")
+    assert pkg.evidence_items[0].source_id
     assert "# Evidence Catalog" in pkg.markdown
+
+
+def test_context_builder_builds_source_cards():
+    docs = [
+        Document(page_content="Alpha evidence", metadata={"chunk_id": "c1", "source_file": "a.pdf", "title": "Paper A", "heading_path": "Results", "page": 1}),
+        Document(page_content="Beta evidence", metadata={"chunk_id": "c2", "source_file": "b.pdf", "title": "Paper B", "heading_path": "Discussion", "page": 3}),
+    ]
+    pkg = ContextBuilder().build(_plan(), docs)
+    assert len(pkg.source_cards) == 2
+    assert pkg.source_cards[0].evidence_labels

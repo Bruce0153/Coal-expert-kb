@@ -288,6 +288,16 @@ def ordered_citations(execution: AskExecution) -> List[Dict[str, Any]]:
     return ordered
 
 
+def format_claims(execution: AskExecution) -> str:
+    lines: List[str] = []
+    for claim in execution.result.claim_items:
+        citations = " ".join(f"[{label}]" for label in claim.get("citations", []))
+        support = claim.get("support")
+        support_text = f" ({support})" if support else ""
+        lines.append(f"- {claim.get('text', '')} {citations}{support_text}".rstrip())
+    return "\n".join(lines)
+
+
 def format_sources(execution: AskExecution) -> str:
     lines: List[str] = []
     for item in ordered_citations(execution):
@@ -297,6 +307,24 @@ def format_sources(execution: AskExecution) -> str:
         heading_text = f" | heading={heading}" if heading else ""
         lines.append(f"[{item['label']}] {item.get('source_file', 'unknown')}{page_text}{heading_text}")
         lines.append(f"  {item.get('snippet', '')}")
+    return "\n".join(lines)
+
+
+def format_source_cards(execution: AskExecution) -> str:
+    lines: List[str] = []
+    for card in execution.result.source_cards:
+        pages = ", ".join(str(page) for page in card.get("pages", []))
+        headings = ", ".join(card.get("headings", []))
+        labels = ", ".join(f"[{label}]" for label in card.get("evidence_labels", []))
+        suffix = []
+        if pages:
+            suffix.append(f"pages={pages}")
+        if headings:
+            suffix.append(f"headings={headings}")
+        details = " | ".join(suffix)
+        title = card.get("title") or card.get("source_file", "unknown")
+        lines.append(f"- {title} ({labels})" + (f" | {details}" if details else ""))
+        lines.append(f"  {card.get('snippet_preview', '')}")
     return "\n".join(lines)
 
 
@@ -318,9 +346,12 @@ def build_response_payload(execution: AskExecution, *, include_debug: bool = Fal
         "retrieval_query": execution.retrieval_query,
         "answer": execution.result.answer_text,
         "referenced_labels": execution.result.referenced_labels,
+        "rendered_citations": execution.result.rendered_citations,
         "citations": ordered_citations(execution),
         "used_chunks": execution.result.used_chunks,
         "evidence_items": execution.result.evidence_items,
+        "source_cards": execution.result.source_cards,
+        "claim_items": execution.result.claim_items,
         "retrieval_trace_summary": retrieval_trace_summary(execution),
         "evidence_sufficiency": execution.result.evidence_sufficiency,
         "confidence_score": execution.result.confidence_score,

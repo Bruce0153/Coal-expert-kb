@@ -37,5 +37,6 @@ def test_context_builder_budget_and_stable_citations():
     ]
     pkg = ContextBuilder().build(_plan(), docs)
     assert len(pkg.used_chunks) == 2
-    assert list(pkg.citations.keys()) == ["S1", "S2"]
-    assert "## H1" in pkg.markdown
+    assert list(pkg.citations.keys()) == ["E1", "E2"]
+    assert pkg.evidence_items[0].source_display.startswith("a.pdf")
+    assert "# Evidence Catalog" in pkg.markdown

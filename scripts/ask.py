@@ -63,8 +63,8 @@ def _run_query(runtime, question: str, *, enable_llm: bool, show_plan: bool, deb
     print(execution.result.answer_text)
 
     if execution.result.citations:
-        print("\nSources:")
-        print(format_sources(execution.result.citations))
+        print("\nEvidence Catalog:")
+        print(format_sources(execution))
 
     print_stats_table(
         "Query Stats",

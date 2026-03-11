@@ -1,3 +1,5 @@
+from langchain_core.documents import Document
+
 from coal_kb.context.builder import ContextBuilder
 from coal_kb.generation.answerer import Answerer
 from coal_kb.query.plan import (
@@ -14,8 +16,8 @@ from coal_kb.query.plan import (
 )
 
 
-def test_answerer_with_context_package_not_crash():
-    plan = QueryPlan(
+def _plan():
+    return QueryPlan(
         query=QueryUnderstanding(raw="q", normalized="q"),
         retrieval_steps=[RetrievalStep(name="s", level="child", k_candidates=5, k_final=3)],
         relax_policy=RelaxPolicy(),
@@ -26,6 +28,20 @@ def test_answerer_with_context_package_not_crash():
         answer=AnswerSpec(),
         observability=ObservabilitySpec(trace_id="t"),
     )
-    pkg = ContextBuilder().build(plan, [])
-    out = Answerer().answer(plan, pkg)
+
+
+def test_answerer_with_context_package_not_crash():
+    pkg = ContextBuilder().build(_plan(), [])
+    out = Answerer().answer(_plan(), pkg)
     assert "Insufficient evidence" in out.answer_text
+
+
+def test_answerer_fallback_references_evidence_labels():
+    docs = [
+        Document(page_content="Steam gasification at 1200 K increases NH3.", metadata={"chunk_id": "c1", "source_file": "paper-a.pdf", "heading_path": "Results", "page": 4}),
+        Document(page_content="HCN remains significant under the same conditions.", metadata={"chunk_id": "c2", "source_file": "paper-b.pdf", "heading_path": "Discussion", "page": 7}),
+    ]
+    pkg = ContextBuilder().build(_plan(), docs)
+    out = Answerer().answer(_plan(), pkg, enable_llm=False)
+    assert "[E1]" in out.answer_text
+    assert out.referenced_labels == ["E1", "E2"]

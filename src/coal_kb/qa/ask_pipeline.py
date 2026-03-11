@@ -256,25 +256,56 @@ def retrieval_diagnostics(execution: AskExecution, *, limit: int = 5) -> List[Di
     return diagnostics
 
 
-def format_sources(citations: Dict[str, Dict[str, Any]]) -> str:
+def ordered_citations(execution: AskExecution) -> List[Dict[str, Any]]:
+    citations = execution.result.citations
+    preferred = execution.result.referenced_labels or list(citations.keys())
+    ordered: List[Dict[str, Any]] = []
+    seen = set()
+    for label in preferred + list(citations.keys()):
+        if label in seen or label not in citations:
+            continue
+        seen.add(label)
+        item = dict(citations[label])
+        item["referenced_in_answer"] = label in execution.result.referenced_labels
+        ordered.append(item)
+    return ordered
+
+
+def format_sources(execution: AskExecution) -> str:
     lines: List[str] = []
-    for sid, item in citations.items():
+    for item in ordered_citations(execution):
         page = item.get("page")
         heading = item.get("heading_path")
         page_text = f" | page={page}" if page is not None else ""
         heading_text = f" | heading={heading}" if heading else ""
-        lines.append(f"- [{sid}] {item.get('source_file', 'unknown')}{page_text}{heading_text} | chunk={item.get('chunk_id')}")
+        lines.append(f"[{item['label']}] {item.get('source_file', 'unknown')}{page_text}{heading_text}")
+        lines.append(f"  {item.get('snippet', '')}")
     return "\n".join(lines)
 
 
-def format_debug_info(execution: AskExecution) -> str:
+def build_response_payload(execution: AskExecution, *, include_debug: bool = False) -> Dict[str, Any]:
     payload = {
+        "query": execution.query,
+        "answer": execution.result.answer_text,
+        "referenced_labels": execution.result.referenced_labels,
+        "citations": ordered_citations(execution),
         "timings_ms": execution.timings_ms,
-        "trace": execution.trace,
-        "context": execution.context_debug,
-        "top_results": retrieval_diagnostics(execution),
+        "diagnostics": {
+            "retrieval": retrieval_diagnostics(execution),
+            "context": execution.context_debug,
+            "trace": execution.trace,
+        }
+        if include_debug
+        else {
+            "retrieval": retrieval_diagnostics(execution),
+            "context": execution.context_debug,
+        },
     }
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    return payload
+
+
+def format_debug_info(execution: AskExecution) -> str:
+    return json.dumps(build_response_payload(execution, include_debug=True), ensure_ascii=False, indent=2)
 
 
 def log_query(runtime: AskRuntime, execution: AskExecution, *, save_trace: bool = False) -> None:
@@ -285,6 +316,7 @@ def log_query(runtime: AskRuntime, execution: AskExecution, *, save_trace: bool 
             "plan": execution.plan.to_dict(),
             "retrieval_trace": execution.trace,
             "citations": execution.result.citations,
+            "referenced_labels": execution.result.referenced_labels,
             "context_debug": execution.context_debug,
         }
         if save_trace

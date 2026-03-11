@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coal Expert KB</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Evidence-Grounded RAG Demo</p>
+          <h1>Coal Expert KB</h1>
+          <p class="hero-copy">
+            Ask technical questions about coal pyrolysis and gasification literature, then inspect the evidence
+            behind every claim.
+          </p>
+        </div>
+        <button id="theme-toggle" class="ghost-button" type="button" aria-label="Toggle theme">Toggle Theme</button>
+      </header>
+
+      <main class="workspace">
+        <section class="panel query-panel">
+          <div class="panel-header">
+            <h2>Ask the Knowledge Base</h2>
+            <p>Use the same cite-aware pipeline as the CLI, with auditable evidence and retrieval diagnostics.</p>
+          </div>
+
+          <form id="ask-form" class="query-form">
+            <label class="query-label" for="query">Question</label>
+            <textarea id="query" name="query" rows="5" placeholder="Example: How does steam gasification influence NH3 and HCN formation around 1200 K?"></textarea>
+
+            <div class="controls">
+              <label class="toggle">
+                <input id="llm" type="checkbox" />
+                <span>LLM answer</span>
+              </label>
+              <label class="toggle">
+                <input id="debug" type="checkbox" />
+                <span>Debug view</span>
+              </label>
+              <label class="compact-field">
+                <span>Top K</span>
+                <input id="k" type="number" min="1" max="20" value="6" />
+              </label>
+              <label class="compact-field">
+                <span>Mode</span>
+                <select id="mode">
+                  <option value="">default</option>
+                  <option value="strict">strict</option>
+                  <option value="balanced">balanced</option>
+                  <option value="broad">broad</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="actions">
+              <button class="primary-button" type="submit">Ask</button>
+              <button id="sample-question" class="ghost-button" type="button">Use Sample Query</button>
+            </div>
+          </form>
+
+          <div id="status" class="status empty">Enter a question to inspect a grounded answer.</div>
+        </section>
+
+        <section class="results-grid">
+          <article class="panel answer-panel">
+            <div class="panel-header">
+              <h2>Answer</h2>
+              <p>Claims should cite evidence labels such as <code>[E1]</code>.</p>
+            </div>
+            <div id="answer-empty" class="empty-state">No answer yet. The next result will appear here.</div>
+            <div id="answer-content" class="answer-content hidden"></div>
+          </article>
+
+          <aside class="panel evidence-panel">
+            <div class="panel-header">
+              <h2>Evidence</h2>
+              <p>Readable citations with file, page, heading, and supporting snippets.</p>
+            </div>
+            <div id="evidence-empty" class="empty-state">Evidence cards will appear after the first query.</div>
+            <div id="evidence-list" class="evidence-list hidden"></div>
+          </aside>
+        </section>
+
+        <section class="panel diagnostics-panel">
+          <div class="panel-header">
+            <h2>Diagnostics</h2>
+            <p>Retrieval timing, top hits, and context packing details for developers.</p>
+          </div>
+          <div id="diag-empty" class="empty-state">Diagnostics are hidden until you run a query.</div>
+          <pre id="diagnostics" class="diagnostics hidden"></pre>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

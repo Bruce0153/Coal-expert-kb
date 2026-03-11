@@ -3,10 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from coal_kb.api.models import AskRequest, AskResponse, CitationResponse, ClaimResponse, SourceCardResponse
+from coal_kb.api.models import (
+    AskRequest,
+    AskResponse,
+    CitationResponse,
+    ClaimResponse,
+    SettingsDefaultsResponse,
+    SourceCardResponse,
+)
+from coal_kb.api.runtime_overrides import apply_runtime_overrides, build_settings_defaults
 from coal_kb.api.routes_chat import build_chat_router
 from coal_kb.conversation.service import ConversationService
 from coal_kb.conversation.store import ConversationStore
@@ -24,6 +33,13 @@ def create_app() -> FastAPI:
         version="0.2.0",
         description="Conversation-capable evidence-grounded RAG API for coal pyrolysis and gasification literature.",
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     conversation_service = ConversationService(ConversationStore(cfg.registry.sqlite_path))
     app.include_router(build_chat_router(cfg, conversation_service))
@@ -35,6 +51,10 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/settings/defaults", response_model=SettingsDefaultsResponse)
+    def settings_defaults() -> SettingsDefaultsResponse:
+        return build_settings_defaults(cfg)
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(static_dir / "index.html")
@@ -45,8 +65,9 @@ def create_app() -> FastAPI:
         if not query:
             raise HTTPException(status_code=400, detail="Query must not be empty.")
 
+        runtime_cfg = apply_runtime_overrides(cfg, payload)
         runtime = build_runtime(
-            cfg.model_copy(deep=True),
+            runtime_cfg,
             backend=payload.backend,
             k=payload.k,
             rerank_enabled=payload.rerank,

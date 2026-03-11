@@ -73,6 +73,8 @@ class ChatOrchestrator:
                 "retrieval_trace_summary": response["retrieval_trace_summary"],
                 "evidence_sufficiency": response["evidence_sufficiency"],
                 "confidence_score": response["confidence_score"],
+                "diagnostics": response["diagnostics"],
+                "timings_ms": response["timings_ms"],
             },
         )
         response["message_id"] = assistant_message.message_id

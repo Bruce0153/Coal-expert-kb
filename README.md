@@ -37,7 +37,9 @@ Coal Expert KB is built to make those questions inspectable.
 - Query planning and constraint-aware retrieval
 - Cite-aware answer generation with evidence labels like `[E1]`
 - CLI experience for debugging retrieval behavior
-- FastAPI + static frontend for interactive demos
+- FastAPI + static three-panel chat frontend for interactive demos
+- Persistent conversation history with evidence-side inspection
+- Local browser settings for runtime request overrides
 
 ## Architecture
 
@@ -61,11 +63,13 @@ Raw documents
 
 ```text
 User question
+  -> conversation memory / follow-up handling
   -> QueryPlanner
   -> ExpertRetriever
   -> ContextBuilder
   -> Answerer
   -> citation catalog + diagnostics
+  -> chat UI / CLI rendering
 ```
 
 ## Cite-aware answering
@@ -115,27 +119,70 @@ That keeps retrieval filters honest and makes debugging much easier.
 
 ## Frontend
 
-The repository now includes a lightweight web app built with:
+The repository now ships with a conversation-first frontend built as a lightweight static app served by FastAPI.
 
-- FastAPI for the backend endpoint
-- static HTML, CSS, and JavaScript for the frontend
+### Why this frontend approach
 
-This choice keeps the project easy to study and avoids unnecessary framework sprawl.
+- It keeps the stack simple enough to study end-to-end.
+- It still feels like a credible mini product instead of a toy demo.
+- It makes evidence inspection a first-class interaction instead of a hidden debug view.
 
-### Frontend goals
+### UI layout
 
-- present answer and evidence together
-- make the evidence-first nature of the system visually obvious
-- provide a polished demo without hiding the engineering
+```text
+| Conversations | Chat Thread + Composer | Evidence / Source / Diagnostics |
+```
+
+The app is desktop-first and organized into three working areas:
+
+- Left sidebar
+  - conversation history
+  - new chat action
+  - quick runtime settings summary
+- Center pane
+  - message thread
+  - grounded assistant answers
+  - inline citation chips
+  - message composer
+- Right inspector
+  - citation references
+  - evidence cards
+  - source cards
+  - retrieval diagnostics
 
 ### Frontend features
 
-- query input and ask action
+- persistent conversation list backed by the API
+- assistant message selection for evidence inspection
 - loading, empty, and error states
-- answer panel with inline evidence labels
-- evidence cards showing file, page, heading, and snippet
-- diagnostics panel for retrieval and context details
-- theme toggle for presentation polish
+- inline citation-aware answer rendering
+- claim map for assistant turns
+- source cards with file, page, heading, and preview text
+- settings drawer with local browser persistence
+- dark/light presentation toggle
+
+### Settings drawer
+
+The settings drawer is intentionally practical and learning-oriented. It lets you configure:
+
+- API base URL
+- provider base URL
+- API key
+- LLM provider
+- LLM model
+- embedding model
+- retrieval backend
+- retrieval mode
+- top-k
+- rerank on/off
+- LLM answer generation on/off
+- debug mode on/off
+
+These settings are stored in `localStorage` and sent with each chat request where applicable.
+
+Important note:
+
+- changing the embedding model at query time only makes sense if it matches the embedding space used to build the index
 
 ## Conversation-capable API
 
@@ -165,6 +212,14 @@ This keeps retrieval explainable while still supporting follow-up questions like
 - "Compare that with steam gasification."
 - "And under higher pressure?"
 
+### Frontend-facing settings endpoint
+
+The frontend loads backend defaults from:
+
+- `GET /api/settings/defaults`
+
+This returns the current server defaults plus supported option lists so the settings drawer can initialize cleanly.
+
 ## Repository structure
 
 ```text
@@ -188,6 +243,7 @@ src/coal_kb/
     app.py                    FastAPI app and /api/ask endpoint
     models.py                 API request / response models
     routes_chat.py            Conversation-oriented chat routes
+    runtime_overrides.py      Request-time model / provider overrides for the UI
   chat/
     orchestrator.py           Multi-turn chat orchestration
     memory.py                 Lightweight history-aware query preparation
@@ -211,9 +267,9 @@ src/coal_kb/
   store/                      Storage integrations
   web/
     static/
-      index.html              Frontend shell
-      styles.css              UI styling
-      app.js                  Frontend behavior
+      index.html              Three-pane chat app shell
+      styles.css              Frontend layout, theme, and visual system
+      app.js                  Chat state, API integration, and settings persistence
 
 tests/
   test_context_builder.py
@@ -338,7 +394,9 @@ Inside interactive mode:
 
 ## Run the frontend
 
-Start the server:
+The frontend is served by the same FastAPI process as the API.
+
+### Start the backend + frontend together
 
 ```bash
 python scripts/serve.py --reload
@@ -349,6 +407,16 @@ Then open:
 ```text
 http://127.0.0.1:8000
 ```
+
+### First-run checklist
+
+1. Start the API with `python scripts/serve.py --reload`
+2. Open the UI in your browser
+3. Open the settings drawer
+4. Confirm the API base URL if you are not using the same origin
+5. Add an API key and provider base URL if your embedding / LLM providers require overrides
+6. Confirm retrieval backend, mode, and top-k
+7. Start a new conversation and ask a grounded question
 
 ## Run the API for chat sessions
 
@@ -368,57 +436,15 @@ The key endpoints for the next frontend phase are:
 
 ### What the frontend calls
 
-Endpoint:
+The primary UI flow is conversation-based:
 
-```text
-POST /api/ask
-```
+- `GET /api/settings/defaults`
+- `GET /api/conversations`
+- `GET /api/conversations/{conversation_id}/messages`
+- `POST /api/chat`
+- `DELETE /api/conversations/{conversation_id}`
 
-Example request body:
-
-```json
-{
-  "query": "How does steam gasification influence NH3 and HCN formation near 1200 K?",
-  "llm": true,
-  "debug": true,
-  "k": 6,
-  "mode": "balanced",
-  "rerank": true
-}
-```
-
-Example response shape:
-
-```json
-{
-  "query": "...",
-  "answer": "## Answer\n...\n[E1]",
-  "referenced_labels": ["E1", "E2"],
-  "citations": [
-    {
-      "label": "E1",
-      "source_file": "paper-a.pdf",
-      "page": 4,
-      "heading_path": "Results",
-      "chunk_id": "abc123",
-      "snippet": "...",
-      "source_display": "paper-a.pdf | page 4 | Results",
-      "referenced_in_answer": true
-    }
-  ],
-  "timings_ms": {
-    "plan": 1.2,
-    "retrieve": 14.5,
-    "context": 0.8,
-    "answer": 420.1,
-    "total": 436.6
-  },
-  "diagnostics": {
-    "retrieval": [],
-    "context": {}
-  }
-}
-```
+`POST /api/ask` still exists for single-turn workflows and CLI parity, but the web app now centers on `POST /api/chat`.
 
 ### Chat endpoint
 
@@ -430,6 +456,10 @@ Request:
   "message": "How does steam gasification affect NH3 and HCN at 1200 K?",
   "llm": true,
   "debug": true,
+  "api_key": "optional-request-time-key",
+  "provider_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "llm_model": "qwen-plus",
+  "embedding_model": "text-embedding-v3",
   "k": 6,
   "mode": "balanced",
   "rerank": true
@@ -444,9 +474,23 @@ Response fields now include:
 - `citations`
 - `used_chunks`
 - `evidence_items`
+- `source_cards`
+- `rendered_citations`
 - `retrieval_trace_summary`
 - `evidence_sufficiency`
 - `confidence_score`
+
+### How the UI uses chat responses
+
+For each assistant message, the frontend stores and renders:
+
+- `answer` as the visible assistant message body
+- `rendered_citations` as compact inline evidence chips
+- `claim_items` as a claim-to-evidence map in the inspector
+- `citations` as evidence cards in the inspector
+- `source_cards` as grouped source summaries
+- `diagnostics` as developer-facing retrieval/context details
+- `evidence_sufficiency` and `confidence_score` as quick trust signals
 
 ## Example workflows
 
@@ -457,7 +501,7 @@ python scripts/index.py build --embedding-version v1
 python scripts/ask.py --backend elastic --mode balanced
 ```
 
-### Workflow 2: use the frontend demo
+### Workflow 2: use the conversation UI
 
 ```bash
 python scripts/serve.py --reload
@@ -465,11 +509,13 @@ python scripts/serve.py --reload
 
 Then:
 
-1. Enter a question in the web UI.
-2. Review the answer section.
-3. Inspect inline labels such as `[E1]`.
-4. Read the matching evidence cards on the right.
-5. Open diagnostics if you want retrieval visibility.
+1. Open the settings drawer and confirm your runtime configuration.
+2. Start a new chat or open an existing conversation from the left sidebar.
+3. Enter a question in the center composer.
+4. Read the grounded assistant answer in the thread view.
+5. Click the assistant message to inspect its evidence panel on the right.
+6. Review citation references, evidence cards, source cards, and diagnostics.
+7. Ask a follow-up question in the same thread to exercise conversation-aware retrieval.
 
 ### Workflow 3: multi-turn chat via API
 
@@ -497,6 +543,7 @@ Examples:
 - The frontend is plain HTML/CSS/JS so developers can inspect the full stack quickly.
 - The ask pipeline is shared between CLI and API to show how product surfaces can reuse the same RAG core.
 - Metadata extraction is deterministic so retrieval behavior can be reasoned about.
+- Runtime settings overrides are applied request-by-request instead of introducing a heavy admin/config subsystem.
 
 ## Testing
 
@@ -519,7 +566,6 @@ Good next steps for future contributors:
 - hybrid retrieval visualization in the frontend
 - richer metadata filters in the web UI
 - streaming answers
-- conversation history
 - stronger citation validation against answer sentences
 - better evaluation datasets for retrieval and faithfulness
 

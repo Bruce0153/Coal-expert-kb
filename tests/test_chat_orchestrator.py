@@ -118,3 +118,4 @@ def test_chat_orchestrator_returns_conversation_capable_response(tmp_path, monke
     assert second.response["message_id"]
     assert second.response["retrieval_trace_summary"]["history_used"] is True
     assert second.response["claim_items"][0]["citations"] == ["E1"]
+    assert "diagnostics" in second.assistant_message.metadata

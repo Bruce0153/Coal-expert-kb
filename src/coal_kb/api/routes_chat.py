@@ -9,6 +9,7 @@ from coal_kb.api.models import (
     CreateConversationRequest,
     MessageResponse,
 )
+from coal_kb.api.runtime_overrides import apply_runtime_overrides
 from coal_kb.chat.orchestrator import ChatOrchestrator
 from coal_kb.conversation.service import ConversationService
 from coal_kb.qa.ask_pipeline import build_runtime
@@ -46,8 +47,9 @@ def build_chat_router(cfg: AppConfig, conversations: ConversationService) -> API
 
     @router.post("/chat", response_model=ChatResponse)
     def chat(payload: ChatRequest) -> ChatResponse:
+        runtime_cfg = apply_runtime_overrides(cfg, payload)
         runtime = build_runtime(
-            cfg.model_copy(deep=True),
+            runtime_cfg,
             backend=payload.backend,
             k=payload.k,
             rerank_enabled=payload.rerank,

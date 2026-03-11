@@ -12,6 +12,7 @@ class LLMConfig:
     provider: str
     base_url: str
     api_key_env: str
+    api_key: Optional[str] = None
     model: str
     temperature: float = 0.0
     timeout: int = 60
@@ -21,7 +22,7 @@ def make_chat_llm(cfg: LLMConfig) -> ChatOpenAI:
     if cfg.provider not in ("dashscope", "openai_compatible", "openai"):
         raise ValueError(f"Unsupported llm.provider: {cfg.provider}")
 
-    api_key = os.getenv(cfg.api_key_env)
+    api_key = cfg.api_key or os.getenv(cfg.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var: {cfg.api_key_env}")
 

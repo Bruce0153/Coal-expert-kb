@@ -12,6 +12,7 @@ class EmbeddingsConfig:
     provider: str
     base_url: str
     api_key_env: str
+    api_key: Optional[str] = None
     model: str
     dimensions: Optional[int] = None
 
@@ -20,7 +21,7 @@ def make_embeddings(cfg: EmbeddingsConfig) -> OpenAIEmbeddings:
     if cfg.provider not in ("dashscope", "openai_compatible", "openai"):
         raise ValueError(f"Unsupported embeddings.provider: {cfg.provider}")
 
-    api_key = os.getenv(cfg.api_key_env)
+    api_key = cfg.api_key or os.getenv(cfg.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var: {cfg.api_key_env}")
 

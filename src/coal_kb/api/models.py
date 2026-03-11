@@ -6,8 +6,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-class AskRequest(BaseModel):
-    query: str = Field(..., min_length=1)
+class RuntimeSettingsRequest(BaseModel):
     llm: bool = False
     debug: bool = False
     backend: Optional[str] = Field(default=None, pattern="^(chroma|elastic|both)?$")
@@ -15,22 +14,23 @@ class AskRequest(BaseModel):
     k: Optional[int] = Field(default=None, ge=1, le=50)
     rerank: bool = True
     llm_provider: str = "none"
+    api_key: Optional[str] = Field(default=None, min_length=1)
+    provider_base_url: Optional[str] = Field(default=None, min_length=1)
+    llm_model: Optional[str] = Field(default=None, min_length=1)
+    embedding_model: Optional[str] = Field(default=None, min_length=1)
+
+
+class AskRequest(RuntimeSettingsRequest):
+    query: str = Field(..., min_length=1)
 
 
 class CreateConversationRequest(BaseModel):
     title: Optional[str] = None
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(RuntimeSettingsRequest):
     conversation_id: Optional[str] = None
     message: str = Field(..., min_length=1)
-    llm: bool = False
-    debug: bool = False
-    backend: Optional[str] = Field(default=None, pattern="^(chroma|elastic|both)?$")
-    mode: Optional[str] = Field(default=None, pattern="^(strict|balanced|broad)?$")
-    k: Optional[int] = Field(default=None, ge=1, le=50)
-    rerank: bool = True
-    llm_provider: str = "none"
 
 
 class CitationResponse(BaseModel):
@@ -101,3 +101,21 @@ class AskResponse(BaseModel):
 class ChatResponse(AskResponse):
     conversation_id: str
     message_id: str
+
+
+class SettingsDefaultsResponse(BaseModel):
+    api_base_url: str = ""
+    provider_base_url: str
+    llm_provider: str
+    llm_model: str
+    embedding_model: str
+    backend: str
+    mode: str
+    k: int
+    rerank: bool
+    llm: bool = False
+    debug: bool = False
+    backend_options: List[str] = Field(default_factory=list)
+    mode_options: List[str] = Field(default_factory=list)
+    llm_provider_options: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)

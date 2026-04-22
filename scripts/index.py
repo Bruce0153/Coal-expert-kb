@@ -35,7 +35,11 @@ def main() -> None:
     switch.add_argument("--index", required=True, help="Target index name.")
 
     sub.add_parser("rollback", help="Rollback alias_current to alias_prev.")
-
+    build.add_argument(
+        "--resume-index",
+        default=None,
+        help="Resume/continue writing into an existing physical index.",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -64,18 +68,27 @@ def main() -> None:
         dims = _resolve_dims(cfg)
         schema_sig = stable_chunk_id(Path("configs/schema.yaml").read_text(encoding="utf-8"))
         schema_hash = schema_sig[:8]
-        index_name = elastic_store.build_index_name(
-            index_prefix=cfg.elastic.index_prefix,
-            embedding_version=cfg.model_versions.embedding_version,
-            schema_hash=schema_hash,
-        )
-        elastic_store.create_index(
-            index_name, dims, enable_icu_analyzer=cfg.elastic.enable_icu_analyzer
-        )
+
+        if args.resume_index:
+            index_name = args.resume_index
+            if not elastic_store.client.indices.exists(index=index_name):
+                raise SystemExit(f"Resume index not found: {index_name}")
+            logger.info("Resuming existing index: %s", index_name)
+            rebuild = False
+        else:
+            index_name = elastic_store.build_index_name(
+                index_prefix=cfg.elastic.index_prefix,
+                embedding_version=cfg.model_versions.embedding_version,
+                schema_hash=schema_hash,
+            )
+            elastic_store.create_index(
+                index_name, dims, enable_icu_analyzer=cfg.elastic.enable_icu_analyzer
+            )
+            rebuild = True
+
         pipe = IngestPipeline(cfg=cfg)
         with progress_status("Building index"):
-            stats = pipe.run(rebuild=True, elastic_index_override=index_name)
-        logger.info("Stage: validate_index | index=%s", index_name)
+            stats = pipe.run(rebuild=rebuild, elastic_index_override=index_name)
         validation = validate_index(
             client=elastic_store.client,
             index_or_alias=index_name,

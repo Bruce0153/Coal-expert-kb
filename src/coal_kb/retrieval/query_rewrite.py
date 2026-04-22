@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 from coal_kb.llm.factory import LLMConfig, make_chat_llm
 
@@ -19,22 +20,36 @@ _MECH_KEYWORDS = [
 ]
 
 _MECH_EXPANSIONS = [
-    "phenols formation mechanism",
-    "phenolic compounds",
-    "tar phenolic compounds",
-    "cleavage",
-    "condensation",
-    "secondary reactions",
-    "oxygen-containing functional groups",
-    "ether bond cleavage",
+    "formation mechanism",
+    "reaction pathway",
+    "reaction network",
+    "precursor conversion",
+    "intermediate species",
 ]
 
-_ZH_EN_MAP = {
+# 只保留“显式 stage 词”的扩展，不再用简单子串误伤“氮氧化物”
+_STAGE_PATTERNS = {
+    "热解": [r"热解", r"\bpyrolysis\b"],
+    "气化": [r"气化", r"\bgasification\b"],
+    "氧化": [r"(^|[\s,，。;；()（）])氧化($|[\s,，。;；()（）])", r"\boxidation\b", r"\boxidative\b"],
+    "燃烧": [r"燃烧", r"\bcombustion\b", r"\bburning\b"],
+    "点火": [r"点火", r"\bignition\b"],
+}
+
+_STAGE_EXPANSIONS = {
     "热解": ["pyrolysis"],
     "气化": ["gasification"],
     "氧化": ["oxidation"],
     "燃烧": ["combustion"],
     "点火": ["ignition"],
+}
+
+_MECH_PATTERNS = {
+    "生成机理": [r"生成机理", r"形成机理", r"\bformation mechanism\b"],
+    "机理": [r"(^|[\s,，。;；()（）])机理($|[\s,，。;；()（）])", r"\bmechanism\b"],
+}
+
+_MECH_RULE_EXPANSIONS = {
     "生成机理": ["formation mechanism", "reaction pathway"],
     "机理": ["mechanism", "reaction pathway"],
 }
@@ -44,6 +59,11 @@ _ZH_EN_MAP = {
 class QueryRewriteResult:
     query: str
     reason: str = ""
+
+
+def _has_any_pattern(text: str, patterns: list[str], *, ignore_case: bool = True) -> bool:
+    flags = re.I if ignore_case else 0
+    return any(re.search(p, text, flags=flags) for p in patterns)
 
 
 def rewrite_query(
@@ -57,13 +77,22 @@ def rewrite_query(
         return QueryRewriteResult(query=query)
 
     lower = base.lower()
-    expansions = []
-    for zh, en_terms in _ZH_EN_MAP.items():
-        if zh in base:
-            expansions.extend(en_terms)
+    expansions: list[str] = []
+
+    # 显式 stage 词才扩展
+    for zh_key, patterns in _STAGE_PATTERNS.items():
+        if _has_any_pattern(base, patterns):
+            expansions.extend(_STAGE_EXPANSIONS[zh_key])
+
+    # 机理类扩展
+    for zh_key, patterns in _MECH_PATTERNS.items():
+        if _has_any_pattern(base, patterns):
+            expansions.extend(_MECH_RULE_EXPANSIONS[zh_key])
+
     if expansions:
         expanded = base + " " + " ".join(sorted(set(expansions)))
         return QueryRewriteResult(query=expanded, reason="zh_rules")
+
     if any(k in lower for k in _MECH_KEYWORDS):
         expanded = base + " " + " ".join(_MECH_EXPANSIONS)
         return QueryRewriteResult(query=expanded, reason="mechanism_rules")

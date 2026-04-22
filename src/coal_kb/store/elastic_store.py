@@ -256,7 +256,19 @@ class ElasticStore:
                 {"_op_type": "index", "_index": index_name, "_id": chunk_id, "_source": norm}
             )
         if actions:
-            self._helpers.bulk(self._client, actions)
+            success, errors = self._helpers.bulk(
+                self._client,
+                actions,
+                raise_on_error=False,
+                stats_only=False,
+            )
+
+            if errors:
+                import json
+                print("bulk errors sample:")
+                for e in errors[:5]:
+                    print(json.dumps(e, ensure_ascii=False, indent=2))
+                raise RuntimeError(f"{len(errors)} docs failed in bulk indexing")
 
     def delete_by_document_id(self, index_name_or_alias: str, document_id: str) -> None:
         self._client.delete_by_query(

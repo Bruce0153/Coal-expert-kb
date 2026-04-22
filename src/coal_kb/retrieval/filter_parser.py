@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from ..metadata.normalize import Ontology, normalize_gas_agents
 from .constraints import Constraint, ConstraintSet
@@ -11,7 +11,6 @@ _RE_NUM = r"(\d+(?:\.\d+)?)"
 
 
 def _range_from_single(v: float, rel: float = 0.05) -> Tuple[float, float]:
-    # +/-5% window by default
     return (v * (1 - rel), v * (1 + rel))
 
 
@@ -23,18 +22,14 @@ class FilterParser:
         q = query.strip()
         must_keywords = ["必须", "only", "strict", "严格", "仅"]
 
-        # stage & gas
         stage, stage_candidates = self._detect_stage(q)
         gas = normalize_gas_agents(q, self.onto)
 
-        # targets: keyword detect (same as ontology)
         from ..metadata.normalize import detect_targets
         targets = detect_targets(q, self.onto)
 
-        # temperature: accept "1200K" or "900C"
         T_range = self._parse_temperature_range(q)
         P_range = self._parse_pressure_range(q)
-
         coal_name = self._parse_coal_name(q)
 
         compat = {
@@ -46,7 +41,9 @@ class FilterParser:
             "gas_agent": gas,
             "targets": targets,
         }
+
         constraints: List[Constraint] = []
+
         if stage and stage != "unknown":
             priority = "hard" if any(k in q for k in must_keywords) else "soft"
             constraints.append(
@@ -59,6 +56,7 @@ class FilterParser:
                     priority=priority,
                 )
             )
+
         if gas:
             constraints.append(
                 Constraint(
@@ -70,6 +68,7 @@ class FilterParser:
                     priority="soft",
                 )
             )
+
         if targets:
             constraints.append(
                 Constraint(
@@ -81,6 +80,7 @@ class FilterParser:
                     priority="soft",
                 )
             )
+
         if T_range:
             priority = "hard" if any(k in q for k in must_keywords) else "soft"
             constraints.append(
@@ -93,6 +93,7 @@ class FilterParser:
                     priority=priority,
                 )
             )
+
         if P_range:
             priority = "hard" if any(k in q for k in must_keywords) else "soft"
             constraints.append(
@@ -105,6 +106,7 @@ class FilterParser:
                     priority=priority,
                 )
             )
+
         if coal_name:
             constraints.append(
                 Constraint(
@@ -116,13 +118,34 @@ class FilterParser:
                     priority="soft",
                 )
             )
+
         return ConstraintSet(constraints=constraints, compat_where=compat)
 
     def _detect_stage(self, q: str) -> Tuple[str, List[str]]:
+        """
+        修复点：
+        - NOx / 氮氧化物 只属于 targets，不自动映射成 oxidation stage
+        - 只有显式 stage 词才设 stage
+        """
         t = q.lower()
+
+        stage_patterns = {
+            "combustion": [r"燃烧", r"\bcombustion\b", r"\bburning\b"],
+            "ignition": [r"点火", r"着火", r"\bignition\b"],
+            "oxidation": [
+                r"(^|[\s,，。;；()（）])氧化($|[\s,，。;；()（）])",
+                r"氧化阶段",
+                r"\boxidation\b",
+                r"\boxidative\b",
+            ],
+            "gasification": [r"气化", r"\bgasification\b"],
+            "pyrolysis": [r"热解", r"裂解", r"\bpyrolysis\b"],
+            "coupled": [r"耦合", r"\bcoupled\b"],
+        }
+
         candidates: List[str] = []
-        for canonical, aliases in self.onto.stage_aliases.items():
-            if any(alias.lower() in t for alias in aliases):
+        for canonical, patterns in stage_patterns.items():
+            if any(re.search(p, q, flags=re.I) for p in patterns):
                 candidates.append(canonical)
 
         if not candidates:
@@ -135,7 +158,6 @@ class FilterParser:
         return candidates[0], candidates
 
     def _parse_temperature_range(self, q: str) -> Optional[List[float]]:
-        # explicit range like "1100-1300 K"
         m = re.search(rf"{_RE_NUM}\s*[-~～]\s*{_RE_NUM}\s*K", q, re.I)
         if m:
             return [float(m.group(1)), float(m.group(2))]
@@ -146,7 +168,6 @@ class FilterParser:
             lo, hi = _range_from_single(v, 0.05)
             return [lo, hi]
 
-        # Celsius
         m = re.search(rf"{_RE_NUM}\s*[-~～]\s*{_RE_NUM}\s*°?\s*C", q, re.I)
         if m:
             lo = float(m.group(1)) + 273.15
@@ -175,7 +196,6 @@ class FilterParser:
         return None
 
     def _parse_coal_name(self, q: str) -> Optional[str]:
-        # very lightweight
         m = re.search(r"(煤种|煤)\s*[:：]\s*([^\n，。;；]+)", q)
         if m:
             return m.group(2).strip()

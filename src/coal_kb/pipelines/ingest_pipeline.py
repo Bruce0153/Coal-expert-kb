@@ -31,6 +31,94 @@ from ..utils.file_hash import sha256_file
 from ..utils.hash import stable_chunk_id
 from ..utils.unicode_sanitize import sanitize_obj
 
+def _is_retryable_embedding_error(exc: Exception) -> bool:
+    msg = str(exc)
+    retry_markers = [
+        "InternalError",
+        "Receive batching backend response failed",
+        "RateLimit",
+        "Timeout",
+        "timed out",
+        "502",
+        "503",
+        "504",
+        "Connection reset",
+    ]
+    return any(m in msg for m in retry_markers)
+
+
+def _embed_documents_resilient(
+    embeddings,
+    batch_docs: List[Dict[str, Any]],
+    *,
+    start_idx: int,
+    logger,
+    max_retries: int = 5,
+    min_batch_size: int = 8,
+) -> List[List[float]]:
+    texts = [d["text"] for d in batch_docs]
+    delay_s = 2
+    last_exc: Optional[Exception] = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return embeddings.embed_documents(texts)
+        except Exception as exc:
+            last_exc = exc
+            retryable = _is_retryable_embedding_error(exc)
+            logger.warning(
+                "Embedding attempt failed | batch=%d-%d attempt=%d/%d retryable=%s error=%s",
+                start_idx,
+                start_idx + len(batch_docs) - 1,
+                attempt + 1,
+                max_retries + 1,
+                retryable,
+                exc,
+            )
+            if retryable and attempt < max_retries:
+                time.sleep(delay_s)
+                delay_s = min(delay_s * 2, 30)
+                continue
+            break
+
+    if last_exc is None:
+        raise RuntimeError("Unknown embedding failure")
+
+    # 非可重试错误，直接抛
+    if not _is_retryable_embedding_error(last_exc):
+        raise last_exc
+
+    # 已经缩到很小了，还失败，就抛
+    if len(batch_docs) <= min_batch_size:
+        raise last_exc
+
+    # 对可重试但持续失败的批次，二分拆小
+    mid = len(batch_docs) // 2
+    logger.warning(
+        "Splitting failed embedding batch | batch=%d-%d size=%d -> %d + %d",
+        start_idx,
+        start_idx + len(batch_docs) - 1,
+        len(batch_docs),
+        mid,
+        len(batch_docs) - mid,
+    )
+    left = _embed_documents_resilient(
+        embeddings,
+        batch_docs[:mid],
+        start_idx=start_idx,
+        logger=logger,
+        max_retries=max_retries,
+        min_batch_size=min_batch_size,
+    )
+    right = _embed_documents_resilient(
+        embeddings,
+        batch_docs[mid:],
+        start_idx=start_idx + mid,
+        logger=logger,
+        max_retries=max_retries,
+        min_batch_size=min_batch_size,
+    )
+    return left + right
 
 logger = logging.getLogger(__name__)
 
@@ -870,10 +958,16 @@ class IngestPipeline:
             stage_start = time.monotonic()
             batch_size = self.cfg.elastic.bulk_chunk_size
             for start in range(0, len(es_docs), batch_size):
-                batch_docs = es_docs[start : start + batch_size]
-                texts = [d["text"] for d in batch_docs]
+                batch_docs = es_docs[start: start + batch_size]
                 try:
-                    vectors = embeddings.embed_documents(texts)
+                    vectors = _embed_documents_resilient(
+                        embeddings,
+                        batch_docs,
+                        start_idx=start,
+                        logger=logger,
+                        max_retries=5,
+                        min_batch_size=8,
+                    )
                 except Exception as e:
                     logger.error(
                         "Embedding failed | batch=%d-%d error=%s",

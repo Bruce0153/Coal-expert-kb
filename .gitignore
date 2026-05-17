@@ -1,11 +1,50 @@
-/data/
-‘EOF'
-.env
+# Python
 __pycache__/
 *.pyc
-storage/
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Data & Storage
 data/
+storage/
 *.db
 *.sqlite
 *.log
-EOF
+
+# Config (sensitive overrides)
+configs/local.yaml
+
+# AI / IDE editors
+.agent/
+.claude/
+.claude.json
+.codebuddy/
+.codex/
+.continue/
+.cursor/
+.gemini/
+.github/prompts/
+.kiro/
+.opencode/
+.qoder/
+.roo/
+.trae/
+.windsurf/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

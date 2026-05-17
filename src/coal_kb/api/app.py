@@ -16,6 +16,7 @@ from coal_kb.api.models import (
     SourceCardResponse,
 )
 from coal_kb.api.runtime_overrides import apply_runtime_overrides, build_settings_defaults
+from coal_kb.api.routes_admin import build_admin_router
 from coal_kb.api.routes_chat import build_chat_router
 from coal_kb.conversation.service import ConversationService
 from coal_kb.conversation.store import ConversationStore
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
 
     conversation_service = ConversationService(ConversationStore(cfg.registry.sqlite_path))
     app.include_router(build_chat_router(cfg, conversation_service))
+    app.include_router(build_admin_router(cfg))
 
     static_dir = Path(__file__).resolve().parents[1] / "web" / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")

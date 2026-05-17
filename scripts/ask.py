@@ -14,7 +14,6 @@ from coal_kb.logging import setup_logging
 from coal_kb.metadata.normalize import Ontology
 from coal_kb.query.planner import QueryPlanner
 from coal_kb.retrieval.bm25 import rrf_fuse
-from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
@@ -89,8 +88,7 @@ def main() -> None:
             verify_certs=cfg.elastic.verify_certs,
             timeout_s=cfg.elastic.timeout_s,
         )
-        elastic_factory = make_elastic_retriever_factory(
-            client=elastic_store.client,
+        elastic_factory = elastic_store.make_retriever_factory(
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=k,

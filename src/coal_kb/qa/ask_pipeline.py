@@ -16,7 +16,6 @@ from coal_kb.metadata.normalize import Ontology
 from coal_kb.query.plan import QueryPlan
 from coal_kb.query.planner import QueryPlanner
 from coal_kb.retrieval.bm25 import rrf_fuse
-from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
@@ -123,8 +122,7 @@ def build_runtime(
             verify_certs=cfg.elastic.verify_certs,
             timeout_s=cfg.elastic.timeout_s,
         )
-        elastic_factory = make_elastic_retriever_factory(
-            client=elastic_store.client,
+        elastic_factory = elastic_store.make_retriever_factory(
             index=cfg.elastic.alias_current,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=active_k,
@@ -184,11 +182,10 @@ def build_runtime(
         planner=planner,
         retriever=retriever,
         context_builder=ContextBuilder(),
-        answerer=Answerer(),
+        answerer=Answerer(enable_llm=enable_llm and llm_config is not None, llm_config=llm_config),
         registry=registry,
         llm_config=llm_config,
     )
-
 
 def execute_query(
     runtime: AskRuntime,
@@ -222,11 +219,7 @@ def execute_query(
     started = time.monotonic()
     result = runtime.answerer.answer(
         plan,
-        context_package,
-        query=query,
-        enable_llm=enable_llm,
-        llm_config=runtime.llm_config,
-        conversation_context=conversation_context,
+        context_package
     )
     answer_ms = (time.monotonic() - started) * 1000
 

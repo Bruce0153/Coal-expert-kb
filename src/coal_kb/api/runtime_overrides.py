@@ -37,7 +37,7 @@ def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
         mode=cfg.retrieval.mode,
         k=cfg.retrieval.k,
         rerank=cfg.retrieval.rerank_enabled,
-        llm=False,
+        llm=True,
         debug=False,
         backend_options=["elastic", "chroma", "both"],
         mode_options=["strict", "balanced", "broad"],

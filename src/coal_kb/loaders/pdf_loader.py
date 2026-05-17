@@ -9,12 +9,12 @@ from typing import Dict, List, Tuple
 from langchain_core.documents import Document
 
 from coal_kb.loaders.base import BaseLoader, detect_language
-from coal_kb.loaders.markdown_clean import (
+from coal_kb.utils.text_clean import (
     collapse_repeated_headers,
-    fix_hyphenation,
     merge_wrapped_lines,
     normalize_bullets,
     normalize_whitespace,
+    repair_hyphenation as fix_hyphenation,
 )
 from coal_kb.loaders.registry import register_loader
 from coal_kb.parsing.pdf_loader import load_pdf_pages

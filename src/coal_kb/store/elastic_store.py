@@ -4,11 +4,13 @@ import logging
 import json
 import re
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Callable
 
 from langchain_core.documents import Document
+
+from coal_kb.retrieval.bm25 import rrf_fuse
 
 logger = logging.getLogger(__name__)
 
@@ -327,39 +329,6 @@ class ElasticStore:
         text_field = "text.icu" if use_icu else "text"
         filter_clauses = self._build_filters(filters)
 
-        compat_missing_is_parent = filters.get("_compat_missing_is_parent", False)
-        if compat_missing_is_parent:
-            # if we are searching children, _build_filters already added {"term":{"is_parent": False}}
-            # replace it with: (is_parent=false) OR (missing is_parent)
-            new_clauses = []
-            replaced = False
-            for c in filter_clauses:
-                if c == {"term": {"is_parent": False}}:
-                    new_clauses.append({
-                        "bool": {
-                            "should": [
-                                {"term": {"is_parent": False}},
-                                {"bool": {"must_not": [{"exists": {"field": "is_parent"}}]}}
-                            ],
-                            "minimum_should_match": 1
-                        }
-                    })
-                    replaced = True
-                else:
-                    new_clauses.append(c)
-            # 如果没找到 term(is_parent:false)，就直接追加（兜底）
-            if not replaced:
-                new_clauses.append({
-                    "bool": {
-                        "should": [
-                            {"term": {"is_parent": False}},
-                            {"bool": {"must_not": [{"exists": {"field": "is_parent"}}]}}
-                        ],
-                        "minimum_should_match": 1
-                    }
-                })
-            filter_clauses = new_clauses
-
         must = [{"match": {text_field: {"query": query_text}}}]
         if heading_boost:
             must.append({"match": {"heading_path_text": {"query": query_text}}})
@@ -403,7 +372,6 @@ class ElasticStore:
         f = dict(filters)
         f["is_parent"] = False
         f["chunk_level"] = 1
-        f["_compat_missing_is_parent"] = True
         return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu, fusion_mode=fusion_mode)
 
     def get_parents_by_ids(self, *, index: str, parent_ids: List[str]) -> Dict[str, Document]:
@@ -443,3 +411,30 @@ class ElasticStore:
             data = self._client.indices.get_alias(name=alias)
             return next(iter(data.keys()))
         return None
+
+    def make_retriever_factory(
+        self,
+        *,
+        index: str,
+        embeddings_cfg: Any = None,
+        candidates: int = 50,
+        rrf_k: int = 60,
+        use_icu: bool = False,
+        tenant_id: Optional[str] = None,
+    ) -> Callable:
+        """Return a factory compatible with ExpertRetriever's vector_retriever_factory."""
+        from coal_kb.embeddings.factory import make_embeddings
+
+        _embeddings = make_embeddings(embeddings_cfg) if embeddings_cfg else None
+
+        def factory(k: int, where: Optional[Dict[str, Any]] = None):
+            class _Retriever:
+                def invoke(_self, query: str) -> List[Document]:
+                    query_vec = _embeddings.embed_query(query) if _embeddings else None
+                    return self._search_hybrid(
+                        index=index, query_text=query, query_embedding=query_vec,
+                        filters=where or {}, k_candidates=max(candidates, k), k_final=k,
+                        use_icu=use_icu,
+                    )
+            return _Retriever()
+        return factory

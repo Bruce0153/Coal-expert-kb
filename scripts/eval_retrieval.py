@@ -10,7 +10,6 @@ from coal_kb.chunking.sectioner import is_reference_like
 from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
-from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.query_rewrite import rewrite_query
 from coal_kb.retrieval.rerank import make_reranker
@@ -149,8 +148,7 @@ def main() -> None:
         verify_certs=cfg.elastic.verify_certs,
         timeout_s=cfg.elastic.timeout_s,
     )
-    vector_factory = make_elastic_retriever_factory(
-        client=elastic_store.client,
+    vector_factory = elastic_store.make_retriever_factory(
         index=cfg.elastic.alias_current,
         embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
         candidates=k,

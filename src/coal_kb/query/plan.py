@@ -51,11 +51,6 @@ class RerankSpec(BaseModel):
     top_n: int = 10
 
 
-class NeighborSpec(BaseModel):
-    enabled: bool = False
-    window: int = 1
-
-
 class DiversitySpec(BaseModel):
     max_per_source: int = 2
 
@@ -63,22 +58,12 @@ class DiversitySpec(BaseModel):
 class ContextSpec(BaseModel):
     max_context_tokens: int = 1800
     max_evidence_chunks: int = 8
-    group_by_heading: bool = True
     deduplicate: bool = True
-    dedup_mode: Literal["text", "embedding", "off"] = "text"
 
 
 class AnswerSpec(BaseModel):
     require_citations: bool = True
-    refuse_threshold: float = 0.3
     min_evidence: int = 2
-    output_format: Literal["markdown", "json"] = "markdown"
-
-
-class ObservabilitySpec(BaseModel):
-    trace_id: str
-    log_plan: bool = True
-    debug: bool = False
 
 
 class QueryPlan(BaseModel):
@@ -86,11 +71,9 @@ class QueryPlan(BaseModel):
     retrieval_steps: List[RetrievalStep] = Field(default_factory=list)
     relax_policy: RelaxPolicy = Field(default_factory=RelaxPolicy)
     rerank: RerankSpec = Field(default_factory=RerankSpec)
-    neighbor: NeighborSpec = Field(default_factory=NeighborSpec)
     diversity: DiversitySpec = Field(default_factory=DiversitySpec)
     context: ContextSpec = Field(default_factory=ContextSpec)
     answer: AnswerSpec = Field(default_factory=AnswerSpec)
-    observability: ObservabilitySpec
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()

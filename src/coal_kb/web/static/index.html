@@ -1,27 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Coal Expert KB</title>
+    <title>煤炭化工专家检索系统</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
-          <div class="brand-mark">KB</div>
+          <div class="brand-mark">
+            <!-- pixel: magnifier over document -->
+            <svg class="pixel-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="1" width="10" height="12" fill="#fff" rx="1"/>
+              <rect x="4" y="3" width="6" height="1" fill="#145e69"/>
+              <rect x="4" y="5" width="6" height="1" fill="#145e69"/>
+              <rect x="4" y="7" width="4" height="1" fill="#145e69"/>
+              <rect x="12" y="11" width="2" height="1" fill="#fff"/>
+              <rect x="13" y="12" width="2" height="1" fill="#fff"/>
+              <rect x="14" y="13" width="2" height="1" fill="#fff"/>
+              <rect x="11" y="11" width="2" height="1" fill="#fff"/>
+              <rect x="5" y="10" width="2" height="1" fill="#145e69"/>
+              <rect x="8" y="10" width="2" height="1" fill="#145e69"/>
+            </svg>
+          </div>
           <div>
-            <p class="eyebrow">Evidence-Grounded Scientific RAG</p>
-            <h1>Coal Expert KB</h1>
-            <p class="hero-copy">A conversation-ready RAG workspace for expert literature, grounded answers, and inspectable evidence.</p>
+            <p class="eyebrow">基于证据的科学文献检索与问答</p>
+            <h1>煤炭化工专家检索系统</h1>
+            <p class="hero-copy">面向煤热解、气化、燃烧领域的科研文献检索与证据溯源平台。</p>
           </div>
         </div>
         <div class="topbar-actions">
-          <div id="backend-pill" class="status-pill">Checking API…</div>
-          <button id="new-chat-top" class="ghost-button" type="button">New Chat</button>
-          <button id="settings-toggle" class="ghost-button" type="button">Settings</button>
-          <button id="theme-toggle" class="ghost-button" type="button" aria-label="Toggle theme">Theme</button>
+          <div id="backend-pill" class="status-pill">检查连接中…</div>
+          <button id="manage-toggle" class="ghost-button" type="button">知识库管理</button>
+          <button id="new-chat-top" class="ghost-button" type="button">新对话</button>
+          <button id="settings-toggle" class="ghost-button" type="button">设置</button>
         </div>
       </header>
 
@@ -29,73 +44,72 @@
         <aside class="sidebar panel">
           <div class="sidebar-header">
             <div>
-              <h2>Conversations</h2>
-              <p>Persistent chat history with retrieval-aware assistant turns.</p>
+              <h2>对话记录</h2>
+              <p>持久化保存，支持多轮追问。</p>
             </div>
-            <button id="new-chat-sidebar" class="primary-button compact" type="button">New</button>
+            <button id="new-chat-sidebar" class="primary-button compact" type="button">新建</button>
           </div>
 
           <div id="settings-summary" class="settings-summary"></div>
 
           <section class="sidebar-section">
             <div class="section-label-row">
-              <span class="section-label">Threads</span>
-              <button id="refresh-conversations" class="text-button" type="button">Refresh</button>
+              <span class="section-label">历史会话</span>
+              <button id="refresh-conversations" class="text-button" type="button">刷新</button>
             </div>
-            <div id="conversation-empty" class="empty-card">No conversations yet. Start a new thread to build a cite-aware answer history.</div>
+            <div id="conversation-empty" class="empty-card">暂无对话记录，点击"新建"开始提问。</div>
             <div id="conversation-list" class="conversation-list"></div>
           </section>
         </aside>
 
         <section class="chat-stage">
-          <div id="thread-status" class="thread-status">Choose an existing conversation or start a new one.</div>
+          <div id="thread-status" class="thread-status">请选择已有对话或新建一个。</div>
 
           <section id="welcome-panel" class="welcome-panel panel">
             <div class="welcome-copy">
-              <p class="eyebrow">Portfolio-Ready RAG UX</p>
-              <h2>Ask a question, inspect the evidence, follow up naturally.</h2>
+              <p class="eyebrow">欢迎使用</p>
+              <h2>提出您的问题，查看证据溯源，进行多轮追问。</h2>
               <p>
-                This interface keeps answer text, citations, source cards, and diagnostics connected. Each assistant turn can
-                be selected to inspect the supporting evidence on the right.
+                本系统将回答文本、文献引用、来源卡片和诊断信息一体化呈现。点击每条 AI 回复，即可在右侧面板查看支撑该结论的文献证据。
               </p>
             </div>
             <div class="sample-prompts">
-              <button class="sample-chip" type="button" data-sample="How does steam gasification influence NH3 and HCN formation near 1200 K?">
-                Steam gasification at 1200 K
+              <button class="sample-chip" type="button" data-sample="蒸汽气化在1200K附近如何影响NH3和HCN的生成？">
+                蒸汽气化条件下NH3和HCN的生成
               </button>
-              <button class="sample-chip" type="button" data-sample="Compare steam gasification with CO2 gasification for nitrogen species evolution.">
-                Compare steam vs CO2
+              <button class="sample-chip" type="button" data-sample="比较蒸汽气化与CO2气化对氮物种释放的影响。">
+                蒸汽气化 vs CO2气化对比
               </button>
-              <button class="sample-chip" type="button" data-sample="What evidence is available for pressure effects on NH3 formation?">
-                Pressure effects on NH3
+              <button class="sample-chip" type="button" data-sample="压力对NH3生成有何影响的文献证据？">
+                压力对NH3生成的影响
               </button>
             </div>
           </section>
 
           <section id="thread-panel" class="thread-panel panel">
-            <div id="thread-empty" class="empty-card">The first assistant answer will appear here with inline citations and evidence summaries.</div>
+            <div id="thread-empty" class="empty-card">发送第一条消息后，AI 回复将显示在此处，并附有引用标记和证据摘要。</div>
             <div id="message-thread" class="message-thread"></div>
             <div id="typing-indicator" class="typing-indicator hidden">
               <span></span><span></span><span></span>
-              <p>Retrieving evidence and drafting a grounded answer…</p>
+              <p>正在检索文献并生成基于证据的回答…</p>
             </div>
           </section>
 
           <form id="chat-form" class="composer panel">
-            <label class="composer-label" for="message-input">Message</label>
+            <label class="composer-label" for="message-input">输入问题</label>
             <textarea
               id="message-input"
               name="message"
-              rows="4"
-              placeholder="Ask a grounded question about the indexed literature…"
+              rows="3"
+              placeholder="请输入您的问题，例如：煤热解过程中氮元素的迁移规律…"
             ></textarea>
             <div class="composer-toolbar">
               <div class="composer-meta">
-                <div id="composer-note" class="composer-note">Answers will be grounded in retrieved chunks with inspectable evidence labels.</div>
+                <div id="composer-note" class="composer-note">回答将基于检索到的文献证据生成，每条结论均可溯源。</div>
               </div>
               <div class="composer-actions">
-                <button id="sample-question" class="ghost-button" type="button">Use Sample</button>
-                <button id="send-button" class="primary-button" type="submit">Send</button>
+                <button id="sample-question" class="ghost-button" type="button">试试示例</button>
+                <button id="send-button" class="primary-button" type="submit">发送</button>
               </div>
             </div>
           </form>
@@ -104,139 +118,207 @@
         <aside class="inspector panel">
           <div class="inspector-header">
             <div>
-              <h2>Evidence Panel</h2>
-              <p id="inspector-caption">Select an assistant message to inspect its supporting evidence and retrieval details.</p>
+              <h2>证据面板</h2>
+              <p id="inspector-caption">点击某条 AI 回复以查看其支撑证据和检索详情。</p>
             </div>
             <div id="inspector-badges" class="inspector-badges"></div>
           </div>
 
-          <div id="inspector-empty" class="empty-card">No assistant answer selected yet.</div>
+          <div id="inspector-empty" class="empty-card">尚未选择任何 AI 回复。</div>
 
           <div id="inspector-content" class="inspector-content hidden">
             <section class="inspector-section">
               <div class="section-label-row">
-                <span class="section-label">Claim Map</span>
+                <span class="section-label">声明溯源</span>
+                <span class="section-hint">最多显示 10 条</span>
               </div>
               <div id="claim-list" class="claim-list"></div>
             </section>
 
             <section class="inspector-section">
               <div class="section-label-row">
-                <span class="section-label">Citation References</span>
+                <span class="section-label">引用列表</span>
               </div>
               <div id="citation-reference-list" class="pill-list"></div>
             </section>
 
             <section class="inspector-section">
               <div class="section-label-row">
-                <span class="section-label">Evidence Items</span>
+                <span class="section-label">证据条目</span>
               </div>
               <div id="evidence-list" class="evidence-list"></div>
             </section>
 
             <section class="inspector-section">
               <div class="section-label-row">
-                <span class="section-label">Source Cards</span>
+                <span class="section-label">来源卡片</span>
               </div>
               <div id="source-card-list" class="source-card-list"></div>
-            </section>
-
-            <section class="inspector-section">
-              <div class="section-label-row">
-                <span class="section-label">Diagnostics</span>
-              </div>
-              <pre id="diagnostics" class="diagnostics"></pre>
             </section>
           </div>
         </aside>
       </main>
     </div>
 
+    <!-- Settings Modal -->
     <div id="settings-modal" class="modal hidden" aria-hidden="true">
       <div id="settings-backdrop" class="modal-backdrop"></div>
       <div class="modal-card">
         <div class="modal-header">
           <div>
-            <p class="eyebrow">Runtime Configuration</p>
-            <h2>Frontend Settings</h2>
-            <p class="modal-copy">These settings are stored locally in your browser and sent with each chat request when relevant.</p>
+            <p class="eyebrow">运行配置</p>
+            <h2>前端设置</h2>
+            <p class="modal-copy">这些设置保存在您的浏览器本地，每次发送请求时生效。</p>
           </div>
-          <button id="settings-close" class="ghost-button" type="button">Close</button>
+          <button id="settings-close" class="ghost-button" type="button">关闭</button>
         </div>
 
         <form id="settings-form" class="settings-form">
           <div class="settings-grid">
             <label class="field">
-              <span>API Base URL</span>
+              <span>API 基础地址</span>
               <input id="setting-api-base-url" type="text" placeholder="http://127.0.0.1:8000" />
             </label>
-
             <label class="field">
-              <span>Provider Base URL</span>
+              <span>Provider 基础地址</span>
               <input id="setting-provider-base-url" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
             </label>
-
             <label class="field">
               <span>API Key</span>
-              <input id="setting-api-key" type="password" placeholder="Optional request-time override" />
+              <input id="setting-api-key" type="password" placeholder="可选，每次请求时覆盖" />
             </label>
-
             <label class="field">
-              <span>LLM Provider</span>
+              <span>LLM 提供商</span>
               <select id="setting-llm-provider"></select>
             </label>
-
             <label class="field">
-              <span>LLM Model</span>
+              <span>LLM 模型</span>
               <input id="setting-llm-model" type="text" placeholder="qwen-plus" />
             </label>
-
             <label class="field">
-              <span>Embedding Model</span>
+              <span>嵌入模型</span>
               <input id="setting-embedding-model" type="text" placeholder="text-embedding-v3" />
             </label>
-
             <label class="field">
-              <span>Retrieval Backend</span>
+              <span>检索后端</span>
               <select id="setting-backend"></select>
             </label>
-
             <label class="field">
-              <span>Retrieval Mode</span>
+              <span>检索模式</span>
               <select id="setting-mode"></select>
             </label>
-
             <label class="field">
-              <span>Top K</span>
+              <span>检索数量 (Top K)</span>
               <input id="setting-k" type="number" min="1" max="20" />
             </label>
-
             <label class="field inline-toggle">
               <input id="setting-rerank" type="checkbox" />
-              <span>Enable reranking</span>
+              <span>启用重排序</span>
             </label>
-
             <label class="field inline-toggle">
               <input id="setting-llm" type="checkbox" />
-              <span>Enable LLM answer generation</span>
+              <span>启用 LLM 生成回答</span>
             </label>
-
             <label class="field inline-toggle">
               <input id="setting-debug" type="checkbox" />
-              <span>Show retrieval diagnostics</span>
+              <span>显示检索诊断信息</span>
             </label>
           </div>
 
           <div id="settings-notes" class="settings-notes"></div>
 
           <div class="modal-actions">
-            <button id="settings-reset" class="ghost-button" type="button">Reset to Defaults</button>
-            <button class="primary-button" type="submit">Save Settings</button>
+            <button id="settings-reset" class="ghost-button" type="button">恢复默认</button>
+            <button class="primary-button" type="submit">保存设置</button>
           </div>
         </form>
       </div>
     </div>
 
+    <!-- Management Modal -->
+    <div id="manage-modal" class="modal hidden" aria-hidden="true">
+      <div id="manage-backdrop" class="modal-backdrop"></div>
+      <div class="modal-card modal-card-wide">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">知识库运维</p>
+            <h2>知识库管理</h2>
+            <p class="modal-copy">上传文档、查看索引状态、管理知识库内容。</p>
+          </div>
+          <button id="manage-close" class="ghost-button" type="button">关闭</button>
+        </div>
+
+        <div class="manage-tabs">
+          <button class="manage-tab active" data-tab="tab-upload">上传文档</button>
+          <button class="manage-tab" data-tab="tab-docs">文档列表</button>
+          <button class="manage-tab" data-tab="tab-stats">知识库统计</button>
+          <button class="manage-tab" data-tab="tab-ingest">执行摄入</button>
+        </div>
+
+        <!-- Tab: Upload -->
+        <div id="tab-upload" class="manage-tab-panel">
+          <div class="upload-dropzone" id="upload-dropzone">
+            <div class="upload-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p>拖拽文件到此处，或点击选择文件</p>
+            <p class="upload-hint">支持 PDF、TXT、MD、DOCX、PPTX、CSV、XLSX、HTML、JSON 格式</p>
+            <input type="file" id="file-input" multiple accept=".pdf,.txt,.md,.docx,.pptx,.csv,.xlsx,.html,.json,.jsonl" hidden/>
+            <button id="upload-btn" class="primary-button compact" type="button">选择文件</button>
+          </div>
+          <div id="upload-file-list" class="upload-file-list hidden"></div>
+          <div class="upload-actions hidden" id="upload-actions">
+            <button id="upload-clear" class="ghost-button" type="button">清空</button>
+            <button id="upload-start" class="primary-button" type="button">开始上传</button>
+          </div>
+          <div id="upload-status" class="upload-status"></div>
+        </div>
+
+        <!-- Tab: Documents -->
+        <div id="tab-docs" class="manage-tab-panel hidden">
+          <div class="manage-toolbar">
+            <button id="refresh-docs" class="ghost-button compact" type="button">刷新列表</button>
+            <span id="doc-count" class="manage-hint"></span>
+          </div>
+          <div id="doc-list" class="doc-list">
+            <div class="empty-card">点击"刷新列表"加载文档。</div>
+          </div>
+        </div>
+
+        <!-- Tab: Stats -->
+        <div id="tab-stats" class="manage-tab-panel hidden">
+          <div id="kb-stats" class="kb-stats">
+            <div class="empty-card">点击"刷新"加载统计信息。</div>
+          </div>
+        </div>
+
+        <!-- Tab: Ingest -->
+        <div id="tab-ingest" class="manage-tab-panel hidden">
+          <div class="ingest-controls">
+            <p class="ingest-desc">执行文档摄入，将已上传的文件进行解析、分块、向量化并写入检索引擎。</p>
+            <div class="ingest-options">
+              <label class="field inline-toggle">
+                <input id="ingest-rebuild" type="checkbox" />
+                <span>重建索引（清空现有数据后重新摄入）</span>
+              </label>
+              <label class="field inline-toggle">
+                <input id="ingest-force" type="checkbox" />
+                <span>强制重新处理所有文件</span>
+              </label>
+            </div>
+            <button id="ingest-start" class="primary-button" type="button">开始摄入</button>
+          </div>
+          <div id="ingest-status" class="ingest-status"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import uuid4
 
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.query_rewrite import rewrite_query
@@ -12,8 +11,6 @@ from .plan import (
     Constraint,
     ContextSpec,
     DiversitySpec,
-    NeighborSpec,
-    ObservabilitySpec,
     QueryPlan,
     QueryUnderstanding,
     RelaxPolicy,
@@ -44,12 +41,8 @@ class QueryPlanner:
 
         def _to_constraint(c) -> Constraint:
             return Constraint(
-                field=c.name,
-                op=c.ctype,
-                value=c.value,
-                priority=c.priority,
-                confidence=c.confidence,
-                source=c.source,
+                field=c.name, op=c.ctype, value=c.value,
+                priority=c.priority, confidence=c.confidence, source=c.source,
             )
 
         q = QueryUnderstanding(
@@ -57,25 +50,20 @@ class QueryPlanner:
             normalized=question.strip(),
             rewritten=rewrite.query,
             rewrite_reason=rewrite.reason,
-            language="zh" if any("\u4e00" <= ch <= "\u9fff" for ch in question) else "en",
+            language="zh" if any("一" <= ch <= "鿿" for ch in question) else "en",
             hard_constraints=[_to_constraint(c) for c in parsed.hard_constraints],
             soft_constraints=[_to_constraint(c) for c in parsed.soft_constraints],
         )
 
         steps = [
             RetrievalStep(
-                name="stage1_parent",
-                level="parent",
-                fusion_mode="rrf",
+                name="stage1_parent", level="parent", fusion_mode="rrf",
                 k_candidates=max(config.retrieval.two_stage.parent_k_candidates, 200),
                 k_final=max(config.retrieval.two_stage.parent_k_final, 80),
-                where_mode="hard_only",
-                enable_relax=False,
+                where_mode="hard_only", enable_relax=False,
             ),
             RetrievalStep(
-                name="stage2_child",
-                level="child",
-                fusion_mode="rrf",
+                name="stage2_child", level="child", fusion_mode="rrf",
                 k_candidates=max(config.retrieval.two_stage.child_k_candidates, 200),
                 k_final=max(config.retrieval.two_stage.child_k_final, 60),
                 where_mode="hard_only",
@@ -83,42 +71,29 @@ class QueryPlanner:
             ),
         ]
 
-        # 关键修改：
-        # 1) 第一步只放宽 flags
-        # 2) 第二步开始允许丢 targets
-        # 3) 第三步最后丢 stage
         schedule = list(config.retrieval.range_expand_schedule or [0.05, 0.1, 0.2])
 
         rules = []
         if len(schedule) >= 1:
-            rules.append(
-                RelaxRule(
-                    drop_fields=["flags"],
-                    widen_ranges={"T_range_K": schedule[0], "P_range_MPa": schedule[0]},
-                    soften_priority=True,
-                )
-            )
+            rules.append(RelaxRule(
+                drop_fields=["flags"],
+                widen_ranges={"T_range_K": schedule[0], "P_range_MPa": schedule[0]},
+                soften_priority=True,
+            ))
         if len(schedule) >= 2:
-            rules.append(
-                RelaxRule(
-                    drop_fields=["flags", "targets"],
-                    widen_ranges={"T_range_K": schedule[1], "P_range_MPa": schedule[1]},
-                    soften_priority=True,
-                )
-            )
+            rules.append(RelaxRule(
+                drop_fields=["flags", "targets"],
+                widen_ranges={"T_range_K": schedule[1], "P_range_MPa": schedule[1]},
+                soften_priority=True,
+            ))
         if len(schedule) >= 3:
-            rules.append(
-                RelaxRule(
-                    drop_fields=["flags", "targets", "stage"],
-                    widen_ranges={"T_range_K": schedule[2], "P_range_MPa": schedule[2]},
-                    soften_priority=True,
-                )
-            )
+            rules.append(RelaxRule(
+                drop_fields=["flags", "targets", "stage"],
+                widen_ranges={"T_range_K": schedule[2], "P_range_MPa": schedule[2]},
+                soften_priority=True,
+            ))
 
-        relax = RelaxPolicy(
-            max_steps=config.retrieval.max_relax_steps,
-            rules=rules,
-        )
+        relax = RelaxPolicy(max_steps=config.retrieval.max_relax_steps, rules=rules)
 
         return QueryPlan(
             query=q,
@@ -128,24 +103,9 @@ class QueryPlanner:
                 enabled=config.retrieval.rerank_enabled,
                 top_n=config.retrieval.rerank_top_n,
             ),
-            neighbor=NeighborSpec(enabled=False, window=1),
             diversity=DiversitySpec(max_per_source=config.retrieval.max_per_source),
             context=ContextSpec(
-                max_context_tokens=4000,
-                max_evidence_chunks=16,
-                group_by_heading=False,
-                deduplicate=False,
-                dedup_mode="text",
+                max_context_tokens=4000, max_evidence_chunks=16,
             ),
-            answer=AnswerSpec(
-                require_citations=True,
-                refuse_threshold=0.0,
-                min_evidence=1,
-                output_format="markdown",
-            ),
-            observability=ObservabilitySpec(
-                trace_id=str(uuid4()),
-                log_plan=True,
-                debug=False,
-            ),
+            answer=AnswerSpec(require_citations=True, min_evidence=1),
         )

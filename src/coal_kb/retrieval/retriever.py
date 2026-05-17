@@ -10,7 +10,7 @@ from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from coal_kb.query.plan import Constraint as PlanConstraint
 from coal_kb.query.plan import QueryPlan
 from coal_kb.store.elastic_store import ElasticStore
-from .bm25 import bm25_rank, rrf_fuse
+from .bm25 import rrf_fuse
 from .constraint_policy import build_plan
 from .constraints import Constraint, ConstraintSet
 from ..chunking.sectioner import is_reference_like
@@ -72,50 +72,80 @@ class ExpertRetriever:
             self._embeddings = make_embeddings(self.embeddings_cfg)
 
     def execute(self, plan: QueryPlan, trace: Optional[Dict[str, Any]] = None) -> List[Document]:
-        if not (self.two_stage_enabled and self.elastic_store and self.elastic_index and self._embeddings is not None):
-            return self._retrieve_single_stage(
-                plan.query.rewritten or plan.query.normalized,
-                self._constraintset_from_plan(plan),
-                trace,
-            )
-
         query = plan.query.rewritten or plan.query.normalized
-        where = self._where_from_plan(plan)
-        qvec = self._embeddings.embed_query(query)
+        constraint_set = self._constraintset_from_plan(plan)
+
+        if not self._two_stage_available():
+            return self._retrieve_single_stage(query, constraint_set, trace)
 
         s1 = next((s for s in plan.retrieval_steps if s.level == "parent"), None)
         s2 = next((s for s in plan.retrieval_steps if s.level == "child"), None)
         if s1 is None or s2 is None:
-            return self._retrieve_single_stage(query, self._constraintset_from_plan(plan), trace)
+            return self._retrieve_single_stage(query, constraint_set, trace)
 
-        # ---------- Stage 1: parents ----------
+        return self._do_two_stage(
+            query, constraint_set, trace,
+            parent_k_candidates=s1.k_candidates, parent_k_final=s1.k_final,
+            child_k_candidates=s2.k_candidates, child_k_final=max(s2.k_final, self.k),
+            enable_relax=s2.enable_relax,
+            use_plan_soft_constraints=plan.query.soft_constraints,
+            plan_for_trace=plan,
+        )
+
+    def retrieve(self, query: str, parsed_filter: Union[Dict[str, Any], ConstraintSet], trace: Optional[Dict[str, Any]] = None) -> List[Document]:
+        constraint_set = parsed_filter if isinstance(parsed_filter, ConstraintSet) else ConstraintSet(constraints=[], compat_where=parsed_filter)
+        if not self._two_stage_available():
+            return self._retrieve_single_stage(query, constraint_set, trace)
+
+        return self._do_two_stage(
+            query, constraint_set, trace,
+            parent_k_candidates=self.parent_k_candidates, parent_k_final=self.parent_k_final,
+            child_k_candidates=self.child_k_candidates, child_k_final=max(self.child_k_final, self.k),
+            enable_relax=self.allow_relax_in_stage2,
+        )
+
+    def _two_stage_available(self) -> bool:
+        return bool(self.two_stage_enabled and self.elastic_store and self.elastic_index and self._embeddings is not None)
+
+    # ------------------------------------------------------------------
+    # unified two-stage retrieval
+    # ------------------------------------------------------------------
+    def _do_two_stage(
+        self,
+        query: str,
+        constraint_set: ConstraintSet,
+        trace: Optional[Dict[str, Any]],
+        *,
+        parent_k_candidates: int,
+        parent_k_final: int,
+        child_k_candidates: int,
+        child_k_final: int,
+        enable_relax: bool = True,
+        use_plan_soft_constraints: Optional[List[PlanConstraint]] = None,
+        plan_for_trace: Optional[QueryPlan] = None,
+    ) -> List[Document]:
+        where = self._build_where(constraint_set)
+        qvec = self._embeddings.embed_query(query)
+
+        # --- stage 1: parents ---
         stage1_filters = dict(where)
         if self.tenant_id:
             stage1_filters["tenant_id"] = self.tenant_id
-
         parents = self.elastic_store.search_parents(
-            index=self.elastic_index,
-            query_embedding=qvec,
-            query_text=query,
-            filters=stage1_filters,
-            k_candidates=s1.k_candidates,
-            k_final=s1.k_final,
+            index=self.elastic_index, query_embedding=qvec, query_text=query,
+            filters=stage1_filters, k_candidates=parent_k_candidates, k_final=parent_k_final,
             use_icu=self.elastic_use_icu,
-            fusion_mode=s1.fusion_mode,
         )
-
         parent_ids = [
-                         str((d.metadata or {}).get("chunk_id"))
-                         for d in parents
-                         if (d.metadata or {}).get("chunk_id")
-                     ][: self.max_parents]
-
+            str((d.metadata or {}).get("chunk_id"))
+            for d in parents if (d.metadata or {}).get("chunk_id")
+        ][:self.max_parents]
         parent_heading = {
             str((d.metadata or {}).get("chunk_id")): str((d.metadata or {}).get("heading_path") or "")
             for d in parents
         }
 
-        # ---------- Stage 2: children under parents ----------
+        # --- stage 2: children ---
         child_filters = dict(where)
         if self.tenant_id:
             child_filters["tenant_id"] = self.tenant_id
@@ -123,58 +153,44 @@ class ExpertRetriever:
             child_filters["parent_ids"] = parent_ids
 
         children = self.elastic_store.search_children(
-            index=self.elastic_index,
-            query_embedding=qvec,
-            query_text=query,
-            filters=child_filters,
-            k_candidates=s2.k_candidates,
-            k_final=max(s2.k_final, self.k),
+            index=self.elastic_index, query_embedding=qvec, query_text=query,
+            filters=child_filters, k_candidates=child_k_candidates, k_final=child_k_final,
             use_icu=self.elastic_use_icu,
-            fusion_mode=s2.fusion_mode,
         )
 
         relax_steps = 0
 
-        # ---------- Fallback A: global child search (drop parent_ids and all query filters) ----------
-        if not children:
+        # fallback: global child search
+        if not parent_ids or not children:
             relax_steps += 1
-            fallback_filters = {}
+            fallback_filters: Dict[str, Any] = {}
             if self.tenant_id:
                 fallback_filters["tenant_id"] = self.tenant_id
-
+            if enable_relax:
+                fallback_filters = dict(where)
+                fallback_filters.pop("T_range_K", None)
+                fallback_filters.pop("P_range_MPa", None)
+                if self.tenant_id:
+                    fallback_filters["tenant_id"] = self.tenant_id
             children = self.elastic_store.search_children(
-                index=self.elastic_index,
-                query_embedding=qvec,
-                query_text=query,
-                filters=fallback_filters,
-                k_candidates=max(s2.k_candidates, 200),
-                k_final=max(s2.k_final, self.k, 40),
-                use_icu=self.elastic_use_icu,
-                fusion_mode=s2.fusion_mode,
+                index=self.elastic_index, query_embedding=qvec, query_text=query,
+                filters=fallback_filters, k_candidates=max(child_k_candidates, 200),
+                k_final=max(child_k_final, self.k, 40), use_icu=self.elastic_use_icu,
             )
-            if trace is not None:
-                trace["two_stage_fallback"] = True
-                trace["fallback_mode"] = "global_child_search"
 
-        # ---------- Fallback B: if child still empty, use parents directly ----------
+        # fallback: use parents directly
         if not children:
-            relax_steps += 1
-            final_docs = parents[: self.k]
-
+            final_docs = parents[:self.k]
             if trace is not None:
-                trace["plan"] = plan.to_dict()
-                trace["stage1_parent_hits"] = len(parents)
-                trace["stage1_parent_ids"] = parent_ids
-                trace["stage2_hits"] = 0
-                trace["relax_steps"] = relax_steps
-                trace["postfiltered_count"] = len(final_docs)
-                trace["fallback_mode"] = "parent_as_evidence"
-                trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
-                trace["source_distribution"] = self._distribution(final_docs, "source_file")
-                trace["heading_distribution"] = self._distribution(final_docs, "heading_path")
+                trace.update({
+                    "stage1_parent_hits": len(parents), "stage1_parent_ids": parent_ids,
+                    "stage2_hits": 0, "relax_steps": relax_steps + 1,
+                    "postfiltered_count": len(final_docs),
+                    "fallback_mode": "parent_as_evidence",
+                })
             return final_docs
 
-        # ---------- Normal path after children found ----------
+        # attach parent headings to children
         for d in children:
             meta = d.metadata or {}
             pid = str(meta.get("parent_id") or "")
@@ -182,41 +198,74 @@ class ExpertRetriever:
                 meta["heading_path"] = parent_heading[pid]
             d.metadata = meta
 
-        filtered, score_map = self._soft_rank(
-            children,
-            [self._to_retrieval_constraint(c) for c in plan.query.soft_constraints],
-        )
+        # soft ranking
+        if use_plan_soft_constraints:
+            soft_constraints = [self._to_retrieval_constraint(c) for c in use_plan_soft_constraints]
+        else:
+            soft_constraints = build_plan(
+                constraint_set, max_relax_steps=self.max_relax_steps,
+                range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2],
+            ).soft_constraints
 
-        if plan.rerank.enabled and filtered and self.reranker is not None:
+        filtered, score_map = self._soft_rank(children, soft_constraints)
+
+        # rerank
+        if self.rerank_enabled and filtered and self.reranker is not None:
             candidate_k = min(self.k, len(filtered))
             reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
-            filtered = reranked + [d for d in filtered if _doc_key(d) not in {_doc_key(x) for x in reranked}]
+            seen = {_doc_key(x) for x in reranked}
+            filtered = reranked + [d for d in filtered if _doc_key(d) not in seen]
 
-        final_docs = self._apply_diversity(filtered, max_per_source=plan.diversity.max_per_source)[: self.k]
+        final_docs = self._apply_diversity(filtered, max_per_source=self.max_per_source)[:self.k]
 
         if trace is not None:
-            trace["plan"] = plan.to_dict()
-            trace["stage1_parent_hits"] = len(parents)
-            trace["stage1_parent_ids"] = parent_ids
-            trace["stage2_hits"] = len(children)
-            trace["relax_steps"] = relax_steps
-            trace["postfiltered_count"] = len(filtered)
-            trace["condition_score_top3"] = [
-                {"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)}
-                for d in filtered[:3]
-            ]
-            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
-            trace["source_distribution"] = self._distribution(final_docs, "source_file")
-            trace["heading_distribution"] = self._distribution(final_docs, "heading_path")
+            trace.update({
+                "stage1_parent_hits": len(parents), "stage1_parent_ids": parent_ids,
+                "stage2_hits": len(children), "relax_steps": relax_steps,
+                "postfiltered_count": len(filtered),
+                "condition_score_top3": [
+                    {"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)}
+                    for d in filtered[:3]
+                ],
+                "final_top_citations": [self._format_citation(d) for d in final_docs[:3]],
+                "source_distribution": self._distribution(final_docs, "source_file"),
+                "heading_distribution": self._distribution(final_docs, "heading_path"),
+            })
+            if plan_for_trace:
+                trace["plan"] = plan_for_trace.to_dict()
+            if relax_steps > 0:
+                trace["two_stage_fallback"] = True
 
         return final_docs
 
-    def retrieve(self, query: str, parsed_filter: Union[Dict[str, Any], ConstraintSet], trace: Optional[Dict[str, Any]] = None) -> List[Document]:
-        constraint_set = parsed_filter if isinstance(parsed_filter, ConstraintSet) else ConstraintSet(constraints=[], compat_where=parsed_filter)
-        if self.two_stage_enabled and self.elastic_store and self.elastic_index and self._embeddings is not None:
-            return self._retrieve_two_stage(query, constraint_set, trace)
-        return self._retrieve_single_stage(query, constraint_set, trace)
+    # ------------------------------------------------------------------
+    # single-stage fallback (Chroma / non-Elastic)
+    # ------------------------------------------------------------------
+    def _retrieve_single_stage(self, query: str, constraint_set: ConstraintSet, trace: Optional[Dict[str, Any]]) -> List[Document]:
+        where = self._build_where(constraint_set)
+        plan = build_plan(constraint_set, max_relax_steps=self.max_relax_steps, range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2])
+        vec_retriever = self.vector_retriever_factory(k=self.k, where=where)
+        docs = vec_retriever.get_relevant_documents(query) if hasattr(vec_retriever, "get_relevant_documents") else vec_retriever.invoke(query)
+        if not docs:
+            return []
+        filtered, score_map = self._soft_rank(docs, plan.soft_constraints)
+        if self.rerank_enabled and filtered and self.reranker is not None:
+            candidate_k = min(self.k, len(filtered))
+            reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
+            seen = {_doc_key(x) for x in reranked}
+            filtered = reranked + [d for d in filtered if _doc_key(d) not in seen]
+        final_docs = self._apply_diversity(filtered)[:self.k]
+        if trace is not None:
+            trace.update({
+                "where": where, "vector_candidates": len(docs), "postfiltered_count": len(filtered),
+                "condition_score_top3": [{"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)} for d in filtered[:3]],
+                "final_top_citations": [self._format_citation(d) for d in final_docs[:3]],
+            })
+        return final_docs
 
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
     def _distribution(self, docs: List[Document], key: str) -> Dict[str, int]:
         out: Dict[str, int] = {}
         for d in docs:
@@ -233,89 +282,15 @@ class ExpertRetriever:
         return ConstraintSet(constraints=constraints, compat_where=self._where_from_plan(plan))
 
     def _where_from_plan(self, plan: QueryPlan) -> Dict[str, Any]:
-        # 极宽松：任何 soft constraint 都不下推到 ES filter
-        # 只保留 hard constraints
-        where: Dict[str, Any] = {}
-        for c in plan.query.hard_constraints:
-            where[c.field] = c.value
+        return {c.field: c.value for c in plan.query.hard_constraints}
+
+    def _build_where(self, constraint_set: ConstraintSet) -> Dict[str, Any]:
+        where = {c.name: c.value for c in constraint_set.hard_constraints}
+        if self.where_full and not constraint_set.constraints:
+            for key, value in (constraint_set.compat_where or {}).items():
+                if key not in where and value is not None:
+                    where[key] = value
         return where
-
-    def _retrieve_two_stage(self, query: str, constraint_set: ConstraintSet, trace: Optional[Dict[str, Any]]) -> List[Document]:
-        where = self._build_where(constraint_set)
-        qvec = self._embeddings.embed_query(query)
-
-        stage1_filters = dict(where)
-        if self.tenant_id:
-            stage1_filters["tenant_id"] = self.tenant_id
-        parents = self.elastic_store.search_parents(index=self.elastic_index, query_embedding=qvec, query_text=query, filters=stage1_filters, k_candidates=self.parent_k_candidates, k_final=self.parent_k_final, use_icu=self.elastic_use_icu)
-        parent_ids = [str((d.metadata or {}).get("chunk_id")) for d in parents if (d.metadata or {}).get("chunk_id")][: self.max_parents]
-        parent_heading = {str((d.metadata or {}).get("chunk_id")): str((d.metadata or {}).get("heading_path") or "") for d in parents}
-
-        if trace is not None:
-            trace["stage1_parent_hits"] = len(parents)
-            trace["stage1_parent_ids"] = parent_ids[:5]
-
-        child_filters = dict(where)
-        if self.tenant_id:
-            child_filters["tenant_id"] = self.tenant_id
-        if parent_ids:
-            child_filters["parent_ids"] = parent_ids
-
-        children = self.elastic_store.search_children(index=self.elastic_index, query_embedding=qvec, query_text=query, filters=child_filters, k_candidates=self.child_k_candidates, k_final=max(self.child_k_final, self.k), use_icu=self.elastic_use_icu)
-
-        if not parent_ids or not children:
-            if trace is not None:
-                trace["two_stage_fallback"] = True
-            fallback_filters = dict(where)
-            if self.tenant_id:
-                fallback_filters["tenant_id"] = self.tenant_id
-            if self.allow_relax_in_stage2:
-                fallback_filters.pop("T_range_K", None)
-                fallback_filters.pop("P_range_MPa", None)
-            children = self.elastic_store.search_children(index=self.elastic_index, query_embedding=qvec, query_text=query, filters=fallback_filters, k_candidates=self.child_k_candidates, k_final=max(self.child_k_final, self.k), use_icu=self.elastic_use_icu)
-
-        for d in children:
-            meta = d.metadata or {}
-            pid = str(meta.get("parent_id") or "")
-            if pid in parent_heading:
-                meta["heading_path"] = parent_heading[pid]
-            d.metadata = meta
-
-        filtered, score_map = self._soft_rank(children, build_plan(constraint_set, max_relax_steps=self.max_relax_steps, range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2]).soft_constraints)
-        if self.rerank_enabled and filtered and self.reranker is not None:
-            candidate_k = min(self.k, len(filtered))
-            reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
-            filtered = reranked + [d for d in filtered if _doc_key(d) not in {_doc_key(x) for x in reranked}]
-
-        final_docs = self._apply_diversity(filtered)[: self.k]
-        if trace is not None:
-            trace["postfiltered_count"] = len(filtered)
-            trace["condition_score_top3"] = [{"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)} for d in filtered[:3]]
-            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
-        return final_docs
-
-    def _retrieve_single_stage(self, query: str, constraint_set: ConstraintSet, trace: Optional[Dict[str, Any]]) -> List[Document]:
-        where = self._build_where(constraint_set)
-        plan = build_plan(constraint_set, max_relax_steps=self.max_relax_steps, range_expand_schedule=self.range_expand_schedule or [0.05, 0.1, 0.2])
-        vec_retriever = self.vector_retriever_factory(k=self.k, where=where)
-        vector_docs = vec_retriever.get_relevant_documents(query) if hasattr(vec_retriever, "get_relevant_documents") else vec_retriever.invoke(query)
-        if not vector_docs:
-            return []
-        fused_docs = rrf_fuse(vector_docs, [d for d, _ in bm25_rank(query, vector_docs)], k=60) if self.use_fuse else vector_docs
-        filtered, score_map = self._soft_rank(fused_docs, plan.soft_constraints)
-        if self.rerank_enabled and filtered and self.reranker is not None:
-            candidate_k = min(self.k, len(filtered))
-            reranked = self.reranker.rerank(query, filtered[:candidate_k], top_k=candidate_k)
-            filtered = reranked + [d for d in filtered if _doc_key(d) not in {_doc_key(x) for x in reranked}]
-        final_docs = self._apply_diversity(filtered)[: self.k]
-        if trace is not None:
-            trace["where"] = where
-            trace["vector_candidates"] = len(vector_docs)
-            trace["fused_candidates"] = len(fused_docs)
-            trace["postfiltered_count"] = len(filtered)
-            trace["condition_score_top3"] = [{"chunk_id": (d.metadata or {}).get("chunk_id"), "score": score_map.get(_doc_key(d), 0.0)} for d in filtered[:3]]
-            trace["final_top_citations"] = [self._format_citation(d) for d in final_docs[:3]]
-        return final_docs
 
     def _format_citation(self, d: Document) -> str:
         m = d.metadata or {}
@@ -326,70 +301,43 @@ class ExpertRetriever:
             return f"{src} [{heading}] #{chunk_id}"
         return f"{src} #{chunk_id}"
 
-    def _build_where(self, constraint_set: ConstraintSet) -> Dict[str, Any]:
-        where = {c.name: c.value for c in constraint_set.hard_constraints}
-        if self.where_full and not constraint_set.constraints:
-            for key, value in (constraint_set.compat_where or {}).items():
-                if key not in where and value is not None:
-                    where[key] = value
-        return where
-
-    def _soft_rank(self, docs: List[Document], constraints: List[Constraint]) -> Tuple[
-        List[Document], Dict[str, float]]:
+    def _soft_rank(self, docs: List[Document], constraints: List[Constraint]) -> Tuple[List[Document], Dict[str, float]]:
         drop_sections = {s.lower().strip() for s in (self.drop_sections or [])}
         scores: Dict[str, float] = {}
-        kept_docs: List[Document] = []
+        kept: List[Document] = []
 
         for idx, d in enumerate(docs):
             meta = d.metadata or {}
-
             if drop_sections and str(meta.get("section", "unknown")).lower().strip() in drop_sections:
                 continue
             if self.drop_reference_like and is_reference_like(d.page_content or ""):
                 continue
 
-            score = 0.0
-            for c in constraints:
-                s = self._constraint_score(meta, c)
-                if s > 0:
-                    score += s
-
+            score = sum(self._constraint_score(meta, c) for c in constraints if self._constraint_score(meta, c) > 0)
             score += (1.0 / (idx + 1))
             scores[_doc_key(d)] = score
-            kept_docs.append(d)
+            kept.append(d)
 
-        ranked = sorted(kept_docs, key=lambda d: scores.get(_doc_key(d), 0.0), reverse=True)
+        ranked = sorted(kept, key=lambda d: scores.get(_doc_key(d), 0.0), reverse=True)
         return ranked, scores
 
     def _constraint_score(self, meta: Dict[str, Any], c: Constraint) -> float:
         weight = max(0.1, c.confidence)
-
         if c.ctype == "range":
-            if _doc_range_overlap(
-                    meta,
-                    c.value or [],
-                    key_point="T_K" if c.name == "T_range_K" else "P_MPa",
-                    key_min="T_min_K" if c.name == "T_range_K" else "P_min_MPa",
-                    key_max="T_max_K" if c.name == "T_range_K" else "P_max_MPa",
-            ):
+            if _doc_range_overlap(meta, c.value or [],
+                                  key_point="T_K" if c.name == "T_range_K" else "P_MPa",
+                                  key_min="T_min_K" if c.name == "T_range_K" else "P_min_MPa",
+                                  key_max="T_max_K" if c.name == "T_range_K" else "P_max_MPa"):
                 return 1.0 * weight
             return 0.0
-
         if c.ctype == "enum":
             return (1.0 if str(meta.get(c.name, "")).lower() == str(c.value).lower() else 0.0) * weight
-
         if c.ctype == "set":
             values = c.value or []
-            hits = 0
-            for v in values:
-                key = f"has_{str(v)}" if c.name == "targets" else f"gas_{str(v).lower()}"
-                if meta.get(key):
-                    hits += 1
+            hits = sum(1 for v in values if meta.get(f"has_{v}" if c.name == "targets" else f"gas_{str(v).lower()}"))
             return ((hits / max(len(values), 1)) if hits else 0.0) * weight
-
         if c.ctype == "text":
             return (0.5 if str(c.value).lower() in str(meta.get(c.name) or "").lower() else 0.0) * weight
-
         return 0.0
 
     def _apply_diversity(self, docs: List[Document], max_per_source: Optional[int] = None) -> List[Document]:

@@ -12,8 +12,8 @@ class LLMConfig:
     provider: str
     base_url: str
     api_key_env: str
-    api_key: Optional[str] = None
     model: str
+    api_key: Optional[str] = None
     temperature: float = 0.0
     timeout: int = 60
 

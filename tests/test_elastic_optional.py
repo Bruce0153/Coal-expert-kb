@@ -6,7 +6,6 @@ import time
 import pytest
 
 from coal_kb.embeddings.factory import EmbeddingsConfig
-from coal_kb.retrieval.elastic_retriever import ElasticRetriever
 from coal_kb.store.elastic_store import ElasticStore
 
 
@@ -53,12 +52,11 @@ def test_elastic_retriever_roundtrip(monkeypatch):
             return [0.1, 0.2, 0.3, 0.4]
 
     monkeypatch.setattr(
-        "coal_kb.retrieval.elastic_retriever.make_embeddings",
+        "coal_kb.store.elastic_store.make_embeddings",
         lambda _cfg: DummyEmbeddings(),
     )
 
-    retriever = ElasticRetriever(
-        client=client,
+    factory = store.make_retriever_factory(
         index=index_name,
         embeddings_cfg=EmbeddingsConfig(
             provider="openai",
@@ -67,8 +65,9 @@ def test_elastic_retriever_roundtrip(monkeypatch):
             model="dummy",
             dimensions=4,
         ),
-        k=2,
+        candidates=10,
     )
+    retriever = factory(k=2)
     docs_out = retriever.invoke("steam gasification")
     assert docs_out
     assert any("gasification" in (d.page_content or "").lower() for d in docs_out)

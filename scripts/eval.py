@@ -10,7 +10,6 @@ from typing import Any, Dict, List
 from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.embeddings.factory import EmbeddingsConfig
 from coal_kb.metadata.normalize import Ontology
-from coal_kb.retrieval.elastic_retriever import make_elastic_retriever_factory
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
@@ -116,8 +115,7 @@ def main() -> None:
         )
         index_name = args.index or cfg.elastic.alias_current
         # ✅ only k candidates
-        vector_factory = make_elastic_retriever_factory(
-            client=elastic_store.client,
+        vector_factory = elastic_store.make_retriever_factory(
             index=index_name,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
             candidates=k,

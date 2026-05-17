@@ -1,0 +1,11 @@
+/data/
+‘EOF'
+.env
+__pycache__/
+*.pyc
+storage/
+data/
+*.db
+*.sqlite
+*.log
+EOF

@@ -169,6 +169,7 @@ class LLMConfig(BaseModel):
     provider: str = "dashscope"
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     api_key_env: str = "DASHSCOPE_API_KEY"
+    api_key: Optional[str] = None
     model: str = "qwen-plus"
     temperature: float = 0.0
     timeout: int = 60
@@ -178,6 +179,7 @@ class RemoteEmbeddingsConfig(BaseModel):
     provider: str = "dashscope"
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     api_key_env: str = "DASHSCOPE_API_KEY"
+    api_key: Optional[str] = None
     model: str = "text-embedding-v3"
     dimensions: Optional[int] = 1024
 

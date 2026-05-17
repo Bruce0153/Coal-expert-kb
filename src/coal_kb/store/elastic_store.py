@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
+import re
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
@@ -15,6 +18,156 @@ class ElasticStore:
     host: str
     verify_certs: bool = False
     timeout_s: int = 60
+
+    def _normalize_doc_for_indexing(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize a chunk document before indexing into Elasticsearch.
+
+        Goal:
+        - Keep original fields (text/source_file/page/embedding...)
+        - Parse metadata_json (if present) and *promote* important keys to top-level,
+          so they can be filtered and searched efficiently (stage/gas_agent/has_NH3/...).
+        - Fix gas_agent: if stored as a JSON-string like "[\"co2\",\"o2\"]", convert to list.
+        - Ensure chunk_id exists and is consistent.
+        - Rebuild metadata_json to a valid JSON string (for debugging / export), using normalized values.
+        """
+        out = dict(doc)
+
+        # 1) Parse metadata_json if it's a string
+        meta: Dict[str, Any] = {}
+        raw_mj = out.get("metadata_json")
+
+        if isinstance(raw_mj, str) and raw_mj.strip():
+            try:
+                meta = json.loads(raw_mj)
+            except Exception:
+                # Some metadata_json may be malformed; do not crash ingestion.
+                meta = {}
+        elif isinstance(raw_mj, dict):
+            meta = dict(raw_mj)
+
+        # 2) Promote selected keys from meta to top-level (only if not already present)
+        # Add keys you rely on for filtering / retrieval.
+        promote_keys = [
+            "chunk_id",
+            "document_id",
+            "source_file",
+            "page",
+            "page_label",
+            "section",
+            "stage",
+            "coal_name",
+            "tenant_id",
+            "parent_id",
+            "heading_path",
+            "chunk_level",
+            "chunk_index",
+            "position_start",
+            "position_end",
+            "T_K",
+            "T_min_K",
+            "T_max_K",
+            "P_MPa",
+            "P_min_MPa",
+            "P_max_MPa",
+            "targets",
+            "gas_agent",
+            "has_NH3", "has_HCN", "has_H2S", "has_SO2", "has_NOx", "has_COS",
+            "gas_o2", "gas_co2", "gas_steam", "gas_n2", "gas_air",
+        ]
+
+        for k in promote_keys:
+            if k in meta and out.get(k) is None:
+                out[k] = meta.get(k)
+
+        # 3) Normalize gas_agent into a real list (preferred for ES terms filter)
+        gas_agent = out.get("gas_agent", None)
+        if isinstance(gas_agent, str):
+            s = gas_agent.strip()
+            # cases:
+            # - '["co2","o2"]' (json list as string)
+            # - "co2,o2" or "co2; o2" (csv-like)
+            if (s.startswith("[") and s.endswith("]")) or (s.startswith('"[') and s.endswith(']"')):
+                try:
+                    out["gas_agent"] = json.loads(s.strip('"'))
+                except Exception:
+                    # fallback: extract tokens
+                    out["gas_agent"] = [x for x in re.split(r"[,\s;]+", s.strip("[]\" ")) if x]
+            else:
+                out["gas_agent"] = [x for x in re.split(r"[,\s;]+", s) if x]
+        elif gas_agent is None:
+            # keep as None (no field)
+            pass
+        else:
+            # list already ok
+            pass
+
+        # 4) Normalize targets into list if it's a scalar
+        targets = out.get("targets", None)
+        if isinstance(targets, str):
+            out["targets"] = [targets]
+        elif targets is None:
+            pass
+
+        # 5) Ensure is_parent exists (needed by two-stage retrieval)
+        # If upstream didn't send it, infer from chunk_level when possible.
+        if out.get("is_parent") is None:
+            cl = out.get("chunk_level", None)
+            if cl is not None:
+                out["is_parent"] = bool(int(cl) == 0)
+            else:
+                # fallback: if it has parent_id, treat as child; else treat as child by default
+                out["is_parent"] = False
+
+        # 6) Ensure chunk_level exists (keep consistent with is_parent)
+        if out.get("chunk_level") is None:
+            out["chunk_level"] = 0 if out.get("is_parent") else 1
+
+        # 7) Ensure chunk_id exists (use meta chunk_id if present)
+        if out.get("chunk_id") is None and isinstance(meta, dict) and meta.get("chunk_id"):
+            out["chunk_id"] = meta.get("chunk_id")
+
+        # 8) Rebuild metadata_json using normalized fields (especially gas_agent list)
+        # Keep all meta keys, but override with normalized versions for important ones.
+        if isinstance(meta, dict):
+            meta2 = dict(meta)
+        else:
+            meta2 = {}
+
+        # Always keep these consistent
+        for k in [
+            "chunk_id",
+            "document_id",
+            "source_file",
+            "page",
+            "page_label",
+            "section",
+            "stage",
+            "coal_name",
+            "tenant_id",
+            "parent_id",
+            "heading_path",
+            "chunk_level",
+            "chunk_index",
+            "position_start",
+            "position_end",
+            "T_K",
+            "T_min_K",
+            "T_max_K",
+            "P_MPa",
+            "P_min_MPa",
+            "P_max_MPa",
+            "targets",
+            "gas_agent",
+            "is_parent",
+        ]:
+            if out.get(k) is not None:
+                meta2[k] = out.get(k)
+
+        out["metadata_json"] = json.dumps(meta2, ensure_ascii=False)
+
+        return out
+
 
     def __post_init__(self) -> None:
         from elasticsearch import Elasticsearch, helpers
@@ -93,10 +246,29 @@ class ElasticStore:
     def bulk_upsert_chunks(self, index_name: str, docs: Iterable[Dict[str, Any]]) -> None:
         actions = []
         for doc in docs:
-            chunk_id = doc["chunk_id"]
-            actions.append({"_op_type": "index", "_index": index_name, "_id": chunk_id, "_source": doc})
+            norm = self._normalize_doc_for_indexing(doc)
+
+            chunk_id = norm.get("chunk_id")
+            if not chunk_id:
+                raise ValueError("Missing chunk_id for ES indexing (after normalization).")
+
+            actions.append(
+                {"_op_type": "index", "_index": index_name, "_id": chunk_id, "_source": norm}
+            )
         if actions:
-            self._helpers.bulk(self._client, actions)
+            success, errors = self._helpers.bulk(
+                self._client,
+                actions,
+                raise_on_error=False,
+                stats_only=False,
+            )
+
+            if errors:
+                import json
+                print("bulk errors sample:")
+                for e in errors[:5]:
+                    print(json.dumps(e, ensure_ascii=False, indent=2))
+                raise RuntimeError(f"{len(errors)} docs failed in bulk indexing")
 
     def delete_by_document_id(self, index_name_or_alias: str, document_id: str) -> None:
         self._client.delete_by_query(
@@ -154,6 +326,40 @@ class ElasticStore:
     ) -> List[Document]:
         text_field = "text.icu" if use_icu else "text"
         filter_clauses = self._build_filters(filters)
+
+        compat_missing_is_parent = filters.get("_compat_missing_is_parent", False)
+        if compat_missing_is_parent:
+            # if we are searching children, _build_filters already added {"term":{"is_parent": False}}
+            # replace it with: (is_parent=false) OR (missing is_parent)
+            new_clauses = []
+            replaced = False
+            for c in filter_clauses:
+                if c == {"term": {"is_parent": False}}:
+                    new_clauses.append({
+                        "bool": {
+                            "should": [
+                                {"term": {"is_parent": False}},
+                                {"bool": {"must_not": [{"exists": {"field": "is_parent"}}]}}
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    })
+                    replaced = True
+                else:
+                    new_clauses.append(c)
+            # 如果没找到 term(is_parent:false)，就直接追加（兜底）
+            if not replaced:
+                new_clauses.append({
+                    "bool": {
+                        "should": [
+                            {"term": {"is_parent": False}},
+                            {"bool": {"must_not": [{"exists": {"field": "is_parent"}}]}}
+                        ],
+                        "minimum_should_match": 1
+                    }
+                })
+            filter_clauses = new_clauses
+
         must = [{"match": {text_field: {"query": query_text}}}]
         if heading_boost:
             must.append({"match": {"heading_path_text": {"query": query_text}}})
@@ -197,6 +403,7 @@ class ElasticStore:
         f = dict(filters)
         f["is_parent"] = False
         f["chunk_level"] = 1
+        f["_compat_missing_is_parent"] = True
         return self._search_hybrid(index=index, query_text=query_text, query_embedding=query_embedding, filters=f, k_candidates=k_candidates, k_final=k_final, use_icu=use_icu, fusion_mode=fusion_mode)
 
     def get_parents_by_ids(self, *, index: str, parent_ids: List[str]) -> Dict[str, Document]:

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="222.199.230.197" id="5f6941df-9845-4131-80a3-b412dcc44a88" port="51512" customName="3090Ti" nameFormat="CUSTOM" username="ubuntu" useOpenSSHConfig="true">
+        <option name="customName" value="3090Ti" />
+      </sshConfig>
+      <sshConfig authType="PASSWORD" host="222.199.230.197" id="e494a6d8-a522-40d3-8c0b-56702ad53ca2" port="54512" customName="3090by2" nameFormat="CUSTOM" username="hongchang" useOpenSSHConfig="true">
+        <option name="customName" value="3090by2" />
+      </sshConfig>
+    </configs>
+  </component>
+</project>

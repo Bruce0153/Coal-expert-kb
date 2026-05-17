@@ -1,1 +1,33 @@
-{"query": "steam gasification NH3 formation", "expected_sources": [{"source_file": "example.pdf", "page": 0}]}
+{"id": "Q001", "query": "NH3 formation mechanism in coal gasification (with evidence)", "expected_sources": [], "tags": ["baseline", "pollutant:NH3"]}
+{"id": "Q002", "query": "HCN formation pathways in coal pyrolysis (cite pages/sections)", "expected_sources": [], "tags": ["baseline", "pollutant:HCN", "stage:pyrolysis"]}
+{"id": "Q003", "query": "氮氧化物 形成机理 与 NH3/HCN 的关系（给证据）", "expected_sources": [], "tags": ["baseline", "pollutant:NOx", "pollutant:NH3", "pollutant:HCN"]}
+{"id": "Q004", "query": "气化 NH3 生成机理", "expected_sources": [], "tags": ["stage:gasification", "pollutant:NH3"]}
+{"id": "Q005", "query": "热解 HCN 生成来源", "expected_sources": [], "tags": ["stage:pyrolysis", "pollutant:HCN"]}
+{"id": "Q006", "query": "combustion NOx formation (evidence)", "expected_sources": [], "tags": ["stage:combustion", "pollutant:NOx"]}
+{"id": "Q007", "query": "点火 NOx 前驱体（NH3/HCN）证据", "expected_sources": [], "tags": ["stage:ignition", "pollutant:NOx", "pollutant:NH3", "pollutant:HCN"]}
+{"id": "Q008", "query": "氧化反应 中 NH3 与 NOx 的转化链路（证据）", "expected_sources": [], "tags": ["stage:oxidation", "pollutant:NH3", "pollutant:NOx"]}
+{"id": "Q009", "query": "蒸汽 气化 NH3 HCN", "expected_sources": [], "tags": ["stage:gasification", "gas:steam", "pollutant:NH3", "pollutant:HCN"]}
+{"id": "Q010", "query": "water vapor gasification ammonia NH3", "expected_sources": [], "tags": ["stage:gasification", "gas:steam", "pollutant:NH3"]}
+{"id": "Q011", "query": "CO2 气化 氰化氢 HCN", "expected_sources": [], "tags": ["stage:gasification", "gas:co2", "pollutant:HCN"]}
+{"id": "Q012", "query": "carbon dioxide gasification HCN", "expected_sources": [], "tags": ["stage:gasification", "gas:co2", "pollutant:HCN"]}
+{"id": "Q013", "query": "air combustion NOx", "expected_sources": [], "tags": ["stage:combustion", "gas:air", "pollutant:NOx"]}
+{"id": "Q014", "query": "oxygen combustion NOx（纯氧）", "expected_sources": [], "tags": ["stage:combustion", "gas:o2", "pollutant:NOx"]}
+{"id": "Q015", "query": "nitrogen 氮气 气化 NH3（对比惰性气氛）", "expected_sources": [], "tags": ["stage:gasification", "gas:n2", "pollutant:NH3"]}
+{"id": "Q016", "query": "蒸汽 气化 NH3 1100-1300K", "expected_sources": [], "tags": ["stage:gasification", "gas:steam", "pollutant:NH3", "T_range"]}
+{"id": "Q017", "query": "CO2 气化 HCN 1200-1400K", "expected_sources": [], "tags": ["stage:gasification", "gas:co2", "pollutant:HCN", "T_range"]}
+{"id": "Q018", "query": "热解 HCN 800-950°C", "expected_sources": [], "tags": ["stage:pyrolysis", "pollutant:HCN", "T_range"]}
+{"id": "Q019", "query": "pyrolysis phenols 600-900 C", "expected_sources": [], "tags": ["stage:pyrolysis", "pollutant:phenols", "T_range"]}
+{"id": "Q020", "query": "燃烧反应 NOx 900-1200K", "expected_sources": [], "tags": ["stage:combustion", "pollutant:NOx", "T_range"]}
+{"id": "Q021", "query": "加压 气化 蒸汽 NH3 2-3 MPa", "expected_sources": [], "tags": ["stage:gasification", "gas:steam", "pollutant:NH3", "P_range"]}
+{"id": "Q022", "query": "CO2 气化 HCN 0.5-2 MPa", "expected_sources": [], "tags": ["stage:gasification", "gas:co2", "pollutant:HCN", "P_range"]}
+{"id": "Q023", "query": "steam gasification NH3 1 MPa 1200K", "expected_sources": [], "tags": ["stage:gasification", "gas:steam", "pollutant:NH3", "P_value", "T_value"]}
+{"id": "Q024", "query": "热解 benzene C6H6 生成机理（证据）", "expected_sources": [], "tags": ["stage:pyrolysis", "pollutant:benzene"]}
+{"id": "Q025", "query": "气化 酚类 phenols 与 benzene 的生成差异（引用证据）", "expected_sources": [], "tags": ["stage:gasification", "pollutant:phenols", "pollutant:benzene"]}
+{"id": "Q026", "query": "H2S SO2 COS 在气化过程中的生成与互相转化（证据）", "expected_sources": [], "tags": ["stage:gasification", "pollutant:H2S", "pollutant:SO2", "pollutant:COS"]}
+{"id": "Q027", "query": "coupled pyrolysis and gasification: NH3/HCN formation differences (evidence)", "expected_sources": [], "tags": ["stage:coupled", "pollutant:NH3", "pollutant:HCN"]}
+{"id": "Q028", "query": "耦合 热解 气化 条件下 NH3 生成（证据）", "expected_sources": [], "tags": ["stage:coupled", "stage:pyrolysis", "stage:gasification", "pollutant:NH3"]}
+{"id": "Q029", "query": "蒸汽气化 vs CO2气化：NH3 与 HCN 的差异与证据对比", "expected_sources": [], "tags": ["compare", "stage:gasification", "gas:steam", "gas:co2", "pollutant:NH3", "pollutant:HCN"]}
+{"id": "Q030", "query": "温度升高（1100→1400K）对 NH3/HCN 哪个更敏感？请给证据", "expected_sources": [], "tags": ["compare", "pollutant:NH3", "pollutant:HCN", "T_range"]}
+{"id": "Q031", "query": "只考虑 蒸汽 气化，温度必须 1200-1400K，目标 NH3 和 HCN", "expected_sources": [], "tags": ["strict", "stage:gasification", "gas:steam", "pollutant:NH3", "pollutant:HCN", "T_range"]}
+{"id": "Q032", "query": "必须是 CO2 气化，压力 2-3 MPa，关注 HCN", "expected_sources": [], "tags": ["strict", "stage:gasification", "gas:co2", "pollutant:HCN", "P_range"]}
+{"id": "Q033", "query": "只看 热解，不要 气化：HCN 的来源证据", "expected_sources": [], "tags": ["strict", "stage:pyrolysis", "pollutant:HCN"]}

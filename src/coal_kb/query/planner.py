@@ -27,7 +27,14 @@ from .plan import (
 class QueryPlanner:
     filter_parser: FilterParser
 
-    def build_plan(self, question: str, config: AppConfig, *, enable_llm: bool = False, llm_config=None) -> QueryPlan:
+    def build_plan(
+        self,
+        question: str,
+        config: AppConfig,
+        *,
+        enable_llm: bool = False,
+        llm_config=None,
+    ) -> QueryPlan:
         parsed = self.filter_parser.parse(question)
         rewrite = rewrite_query(
             question,
@@ -60,42 +67,85 @@ class QueryPlanner:
                 name="stage1_parent",
                 level="parent",
                 fusion_mode="rrf",
-                k_candidates=config.retrieval.two_stage.parent_k_candidates,
-                k_final=config.retrieval.two_stage.parent_k_final,
-                where_mode="full",
+                k_candidates=max(config.retrieval.two_stage.parent_k_candidates, 200),
+                k_final=max(config.retrieval.two_stage.parent_k_final, 80),
+                where_mode="hard_only",
                 enable_relax=False,
             ),
             RetrievalStep(
                 name="stage2_child",
                 level="child",
                 fusion_mode="rrf",
-                k_candidates=config.retrieval.two_stage.child_k_candidates,
-                k_final=config.retrieval.two_stage.child_k_final,
-                where_mode="full",
+                k_candidates=max(config.retrieval.two_stage.child_k_candidates, 200),
+                k_final=max(config.retrieval.two_stage.child_k_final, 60),
+                where_mode="hard_only",
                 enable_relax=config.retrieval.two_stage.allow_relax_in_stage2,
             ),
         ]
 
-        relax = RelaxPolicy(
-            max_steps=config.retrieval.max_relax_steps,
-            rules=[
+        # 关键修改：
+        # 1) 第一步只放宽 flags
+        # 2) 第二步开始允许丢 targets
+        # 3) 第三步最后丢 stage
+        schedule = list(config.retrieval.range_expand_schedule or [0.05, 0.1, 0.2])
+
+        rules = []
+        if len(schedule) >= 1:
+            rules.append(
                 RelaxRule(
                     drop_fields=["flags"],
-                    widen_ranges={"T_range_K": x, "P_range_MPa": x},
+                    widen_ranges={"T_range_K": schedule[0], "P_range_MPa": schedule[0]},
                     soften_priority=True,
                 )
-                for x in config.retrieval.range_expand_schedule
-            ],
+            )
+        if len(schedule) >= 2:
+            rules.append(
+                RelaxRule(
+                    drop_fields=["flags", "targets"],
+                    widen_ranges={"T_range_K": schedule[1], "P_range_MPa": schedule[1]},
+                    soften_priority=True,
+                )
+            )
+        if len(schedule) >= 3:
+            rules.append(
+                RelaxRule(
+                    drop_fields=["flags", "targets", "stage"],
+                    widen_ranges={"T_range_K": schedule[2], "P_range_MPa": schedule[2]},
+                    soften_priority=True,
+                )
+            )
+
+        relax = RelaxPolicy(
+            max_steps=config.retrieval.max_relax_steps,
+            rules=rules,
         )
 
         return QueryPlan(
             query=q,
             retrieval_steps=steps,
             relax_policy=relax,
-            rerank=RerankSpec(enabled=config.retrieval.rerank_enabled, top_n=config.retrieval.rerank_top_n),
+            rerank=RerankSpec(
+                enabled=config.retrieval.rerank_enabled,
+                top_n=config.retrieval.rerank_top_n,
+            ),
             neighbor=NeighborSpec(enabled=False, window=1),
             diversity=DiversitySpec(max_per_source=config.retrieval.max_per_source),
-            context=ContextSpec(),
-            answer=AnswerSpec(),
-            observability=ObservabilitySpec(trace_id=str(uuid4()), log_plan=True, debug=False),
+            context=ContextSpec(
+                max_context_tokens=4000,
+                max_evidence_chunks=16,
+                group_by_heading=False,
+                deduplicate=False,
+                dedup_mode="text",
+            ),
+            answer=AnswerSpec(
+                require_citations=True,
+                refuse_threshold=0.0,
+                min_evidence=1,
+                output_format="markdown",
+            ),
+            observability=ObservabilitySpec(
+                trace_id=str(uuid4()),
+                log_plan=True,
+                debug=False,
+            ),
         )

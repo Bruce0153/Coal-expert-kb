@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coal Expert KB</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark">KB</div>
+          <div>
+            <p class="eyebrow">Evidence-Grounded Scientific RAG</p>
+            <h1>Coal Expert KB</h1>
+            <p class="hero-copy">A conversation-ready RAG workspace for expert literature, grounded answers, and inspectable evidence.</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div id="backend-pill" class="status-pill">Checking API…</div>
+          <button id="new-chat-top" class="ghost-button" type="button">New Chat</button>
+          <button id="settings-toggle" class="ghost-button" type="button">Settings</button>
+          <button id="theme-toggle" class="ghost-button" type="button" aria-label="Toggle theme">Theme</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar panel">
+          <div class="sidebar-header">
+            <div>
+              <h2>Conversations</h2>
+              <p>Persistent chat history with retrieval-aware assistant turns.</p>
+            </div>
+            <button id="new-chat-sidebar" class="primary-button compact" type="button">New</button>
+          </div>
+
+          <div id="settings-summary" class="settings-summary"></div>
+
+          <section class="sidebar-section">
+            <div class="section-label-row">
+              <span class="section-label">Threads</span>
+              <button id="refresh-conversations" class="text-button" type="button">Refresh</button>
+            </div>
+            <div id="conversation-empty" class="empty-card">No conversations yet. Start a new thread to build a cite-aware answer history.</div>
+            <div id="conversation-list" class="conversation-list"></div>
+          </section>
+        </aside>
+
+        <section class="chat-stage">
+          <div id="thread-status" class="thread-status">Choose an existing conversation or start a new one.</div>
+
+          <section id="welcome-panel" class="welcome-panel panel">
+            <div class="welcome-copy">
+              <p class="eyebrow">Portfolio-Ready RAG UX</p>
+              <h2>Ask a question, inspect the evidence, follow up naturally.</h2>
+              <p>
+                This interface keeps answer text, citations, source cards, and diagnostics connected. Each assistant turn can
+                be selected to inspect the supporting evidence on the right.
+              </p>
+            </div>
+            <div class="sample-prompts">
+              <button class="sample-chip" type="button" data-sample="How does steam gasification influence NH3 and HCN formation near 1200 K?">
+                Steam gasification at 1200 K
+              </button>
+              <button class="sample-chip" type="button" data-sample="Compare steam gasification with CO2 gasification for nitrogen species evolution.">
+                Compare steam vs CO2
+              </button>
+              <button class="sample-chip" type="button" data-sample="What evidence is available for pressure effects on NH3 formation?">
+                Pressure effects on NH3
+              </button>
+            </div>
+          </section>
+
+          <section id="thread-panel" class="thread-panel panel">
+            <div id="thread-empty" class="empty-card">The first assistant answer will appear here with inline citations and evidence summaries.</div>
+            <div id="message-thread" class="message-thread"></div>
+            <div id="typing-indicator" class="typing-indicator hidden">
+              <span></span><span></span><span></span>
+              <p>Retrieving evidence and drafting a grounded answer…</p>
+            </div>
+          </section>
+
+          <form id="chat-form" class="composer panel">
+            <label class="composer-label" for="message-input">Message</label>
+            <textarea
+              id="message-input"
+              name="message"
+              rows="4"
+              placeholder="Ask a grounded question about the indexed literature…"
+            ></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-meta">
+                <div id="composer-note" class="composer-note">Answers will be grounded in retrieved chunks with inspectable evidence labels.</div>
+              </div>
+              <div class="composer-actions">
+                <button id="sample-question" class="ghost-button" type="button">Use Sample</button>
+                <button id="send-button" class="primary-button" type="submit">Send</button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <aside class="inspector panel">
+          <div class="inspector-header">
+            <div>
+              <h2>Evidence Panel</h2>
+              <p id="inspector-caption">Select an assistant message to inspect its supporting evidence and retrieval details.</p>
+            </div>
+            <div id="inspector-badges" class="inspector-badges"></div>
+          </div>
+
+          <div id="inspector-empty" class="empty-card">No assistant answer selected yet.</div>
+
+          <div id="inspector-content" class="inspector-content hidden">
+            <section class="inspector-section">
+              <div class="section-label-row">
+                <span class="section-label">Claim Map</span>
+              </div>
+              <div id="claim-list" class="claim-list"></div>
+            </section>
+
+            <section class="inspector-section">
+              <div class="section-label-row">
+                <span class="section-label">Citation References</span>
+              </div>
+              <div id="citation-reference-list" class="pill-list"></div>
+            </section>
+
+            <section class="inspector-section">
+              <div class="section-label-row">
+                <span class="section-label">Evidence Items</span>
+              </div>
+              <div id="evidence-list" class="evidence-list"></div>
+            </section>
+
+            <section class="inspector-section">
+              <div class="section-label-row">
+                <span class="section-label">Source Cards</span>
+              </div>
+              <div id="source-card-list" class="source-card-list"></div>
+            </section>
+
+            <section class="inspector-section">
+              <div class="section-label-row">
+                <span class="section-label">Diagnostics</span>
+              </div>
+              <pre id="diagnostics" class="diagnostics"></pre>
+            </section>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="settings-modal" class="modal hidden" aria-hidden="true">
+      <div id="settings-backdrop" class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Runtime Configuration</p>
+            <h2>Frontend Settings</h2>
+            <p class="modal-copy">These settings are stored locally in your browser and sent with each chat request when relevant.</p>
+          </div>
+          <button id="settings-close" class="ghost-button" type="button">Close</button>
+        </div>
+
+        <form id="settings-form" class="settings-form">
+          <div class="settings-grid">
+            <label class="field">
+              <span>API Base URL</span>
+              <input id="setting-api-base-url" type="text" placeholder="http://127.0.0.1:8000" />
+            </label>
+
+            <label class="field">
+              <span>Provider Base URL</span>
+              <input id="setting-provider-base-url" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+            </label>
+
+            <label class="field">
+              <span>API Key</span>
+              <input id="setting-api-key" type="password" placeholder="Optional request-time override" />
+            </label>
+
+            <label class="field">
+              <span>LLM Provider</span>
+              <select id="setting-llm-provider"></select>
+            </label>
+
+            <label class="field">
+              <span>LLM Model</span>
+              <input id="setting-llm-model" type="text" placeholder="qwen-plus" />
+            </label>
+
+            <label class="field">
+              <span>Embedding Model</span>
+              <input id="setting-embedding-model" type="text" placeholder="text-embedding-v3" />
+            </label>
+
+            <label class="field">
+              <span>Retrieval Backend</span>
+              <select id="setting-backend"></select>
+            </label>
+
+            <label class="field">
+              <span>Retrieval Mode</span>
+              <select id="setting-mode"></select>
+            </label>
+
+            <label class="field">
+              <span>Top K</span>
+              <input id="setting-k" type="number" min="1" max="20" />
+            </label>
+
+            <label class="field inline-toggle">
+              <input id="setting-rerank" type="checkbox" />
+              <span>Enable reranking</span>
+            </label>
+
+            <label class="field inline-toggle">
+              <input id="setting-llm" type="checkbox" />
+              <span>Enable LLM answer generation</span>
+            </label>
+
+            <label class="field inline-toggle">
+              <input id="setting-debug" type="checkbox" />
+              <span>Show retrieval diagnostics</span>
+            </label>
+          </div>
+
+          <div id="settings-notes" class="settings-notes"></div>
+
+          <div class="modal-actions">
+            <button id="settings-reset" class="ghost-button" type="button">Reset to Defaults</button>
+            <button class="primary-button" type="submit">Save Settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

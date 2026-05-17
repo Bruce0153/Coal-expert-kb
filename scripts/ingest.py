@@ -17,11 +17,6 @@ def main() -> None:
     parser.add_argument("--tables", action="store_true", help="Enable optional table extraction (Camelot).")
     parser.add_argument("--table-flavor", default="lattice", choices=["lattice", "stream", "auto"])
     parser.add_argument(
-        "--llm-metadata",
-        action="store_true",
-        help="Enable LLM metadata augmentation (LLM is configured in configs/app.yaml).",
-    )
-    parser.add_argument(
         "--rebuild",
         action="store_true",
         help="Rebuild the KB (clear vectorstore + manifest) before ingest.",
@@ -62,11 +57,10 @@ def main() -> None:
         cfg.embeddings.model,
     )
     logger.info(
-        "Chunking | size=%d overlap=%d | tables=%s llm_metadata=%s",
+        "Chunking | size=%d overlap=%d | tables=%s",
         cfg.chunking.chunk_size,
         cfg.chunking.chunk_overlap,
         args.tables,
-        args.llm_metadata,
     )
     logger.info(
         "Backend | mode=%s registry_db=%s",
@@ -79,7 +73,6 @@ def main() -> None:
         cfg=cfg,
         enable_table_extraction=args.tables,
         table_flavor=args.table_flavor,
-        enable_llm_metadata=args.llm_metadata,
     )
     with progress_status("Ingesting documents"):
         stats = pipe.run(rebuild=args.rebuild, force=args.force)

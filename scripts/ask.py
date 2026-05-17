@@ -56,20 +56,48 @@ def main() -> None:
     rerank_top_n = int(args.rerank_top_k or cfg.retrieval.rerank_top_n)
     mode = args.mode or cfg.retrieval.mode
 
-    print_kv("Retrieval Config", {"backend": backend, "k": str(k), "rerank_enabled": str(rerank_enabled), "rerank_top_n": str(rerank_top_n), "max_per_source": str(cfg.retrieval.max_per_source), "mode": mode})
+    print_kv(
+        "Retrieval Config",
+        {
+            "backend": backend,
+            "k": str(k),
+            "rerank_enabled": str(rerank_enabled),
+            "rerank_top_n": str(rerank_top_n),
+            "max_per_source": str(cfg.retrieval.max_per_source),
+            "mode": mode,
+        },
+    )
 
     registry = RegistrySQLite(cfg.registry.sqlite_path)
 
     chroma_factory = None
     elastic_factory = None
     elastic_store = None
+
     if backend in {"chroma", "both"}:
-        store = ChromaStore(persist_dir=cfg.paths.chroma_dir, collection_name=cfg.chroma.collection_name, embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()), embedding_model=cfg.embedding.model_name)
+        store = ChromaStore(
+            persist_dir=cfg.paths.chroma_dir,
+            collection_name=cfg.chroma.collection_name,
+            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            embedding_model=cfg.embedding.model_name,
+        )
         chroma_factory = store.as_retriever
 
     if backend in {"elastic", "both"}:
-        elastic_store = ElasticStore(host=cfg.elastic.host, verify_certs=cfg.elastic.verify_certs, timeout_s=cfg.elastic.timeout_s)
-        elastic_factory = make_elastic_retriever_factory(client=elastic_store.client, index=cfg.elastic.alias_current, embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()), candidates=k, rrf_k=cfg.retrieval.rrf_k, use_icu=cfg.elastic.enable_icu_analyzer, tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None)
+        elastic_store = ElasticStore(
+            host=cfg.elastic.host,
+            verify_certs=cfg.elastic.verify_certs,
+            timeout_s=cfg.elastic.timeout_s,
+        )
+        elastic_factory = make_elastic_retriever_factory(
+            client=elastic_store.client,
+            index=cfg.elastic.alias_current,
+            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            candidates=k,
+            rrf_k=cfg.retrieval.rrf_k,
+            use_icu=cfg.elastic.enable_icu_analyzer,
+            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
+        )
 
     if backend == "both":
         vector_factory = _combine_factories(chroma_factory, elastic_factory, rrf_k=cfg.retrieval.rrf_k)
@@ -114,51 +142,69 @@ def main() -> None:
     llm_cfg = LLMConfig(**{**cfg.llm.model_dump(), "provider": provider})
 
     context_builder = ContextBuilder()
-    answerer = Answerer()
+    answerer = Answerer(
+        enable_llm=args.llm,
+        llm_config=llm_cfg if args.llm else None,
+    )
 
     while True:
         q = input("\n你的问题> ").strip()
         if not q:
             continue
 
-        plan = planner.build_plan(q, cfg, enable_llm=args.llm, llm_config=llm_cfg)
-        if args.show_plan:
-            print("\nQueryPlan:")
-            print(plan.to_json())
+        try:
+            plan = planner.build_plan(q, cfg, enable_llm=args.llm, llm_config=llm_cfg)
+            if args.show_plan:
+                print("\nQueryPlan:")
+                print(plan.to_json())
 
-        trace: dict = {}
-        start = time.monotonic()
-        docs = expert.execute(plan, trace=trace)
-        ctx = context_builder.build(plan, docs)
-        result = answerer.answer(plan, ctx)
-        latency_ms = (time.monotonic() - start) * 1000
+            trace: dict = {}
+            start = time.monotonic()
+            docs = expert.execute(plan, trace=trace)
+            ctx = context_builder.build(plan, docs)
+            result = answerer.answer(plan, ctx)
+            latency_ms = (time.monotonic() - start) * 1000
 
-        _print_trace(trace, docs)
-        print_stats_table("Query Stats", [("docs", str(len(docs))), ("latency_ms", f"{latency_ms:.2f}")])
-        print("\n" + result.answer_text)
-        if result.citations:
-            print("\n引用列表:")
-            for sid, item in result.citations.items():
-                print(f"- [{sid}] {item['source_file']} | page={item.get('page')} | heading={item.get('heading_path')} | chunk={item['chunk_id']}")
+            _print_trace(trace, docs)
+            print_stats_table("Query Stats", [("docs", str(len(docs))), ("latency_ms", f"{latency_ms:.2f}")])
+            print("\n" + result.answer_text)
 
-        registry.log_query(
-            query=plan.query.rewritten or plan.query.normalized,
-            filters=trace.get("where") or {},
-            constraints={"plan": plan.to_dict(), "retrieval_trace": trace, "citations": result.citations} if args.save_trace else {"plan": plan.to_dict()},
-            top_chunk_ids=[d.metadata.get("chunk_id") for d in docs],
-            top_source_files=[d.metadata.get("source_file") for d in docs],
-            latency_ms=round(latency_ms, 2),
-            backend=backend,
-            tenant_id=None,
-            embedding_version=cfg.model_versions.embedding_version,
-            rerank_enabled=expert.rerank_enabled,
-            mode=mode,
-            relax_steps=trace.get("relax_steps") if isinstance(trace.get("relax_steps"), list) else None,
-            diversity_k=trace.get("diversity@k"),
-        )
+            if result.citations:
+                print("\n引用列表:")
+                for sid, item in result.citations.items():
+                    print(
+                        f"- [{sid}] {item['source_file']} | page={item.get('page')} | "
+                        f"heading={item.get('heading_path')} | chunk={item['chunk_id']}"
+                    )
 
-        if args.save_trace:
-            print(f"trace_id: {plan.observability.trace_id}")
+            registry.log_query(
+                query=plan.query.rewritten or plan.query.normalized,
+                filters=trace.get("where") or {},
+                constraints={
+                    "plan": plan.to_dict(),
+                    "retrieval_trace": trace,
+                    "citations": result.citations,
+                }
+                if args.save_trace
+                else {"plan": plan.to_dict()},
+                top_chunk_ids=[d.metadata.get("chunk_id") for d in docs],
+                top_source_files=[d.metadata.get("source_file") for d in docs],
+                latency_ms=round(latency_ms, 2),
+                backend=backend,
+                tenant_id=None,
+                embedding_version=cfg.model_versions.embedding_version,
+                rerank_enabled=expert.rerank_enabled,
+                mode=mode,
+                relax_steps=trace.get("relax_steps") if isinstance(trace.get("relax_steps"), list) else None,
+                diversity_k=trace.get("diversity@k"),
+            )
+
+            if args.save_trace:
+                print(f"trace_id: {plan.observability.trace_id}")
+
+        except Exception as e:
+            print(f"\n检索或回答失败: {type(e).__name__}: {e}")
+            logger.exception("Ask loop failed")
 
 
 def _print_trace(trace: dict, docs: list) -> None:
@@ -168,6 +214,8 @@ def _print_trace(trace: dict, docs: list) -> None:
     print(f"  stage1_parent_hits={trace.get('stage1_parent_hits', 0)}")
     print(f"  stage2_hits={trace.get('stage2_hits', 0)}")
     print(f"  relax_steps={trace.get('relax_steps', 0)}")
+    if trace.get("fallback_mode"):
+        print(f"  fallback_mode={trace.get('fallback_mode')}")
     if docs:
         print("  source_distribution:", trace.get("source_distribution", {}))
         print("  heading_distribution:", trace.get("heading_distribution", {}))
@@ -192,12 +240,20 @@ class _CombinedRetriever:
     def invoke(self, query: str):
         chroma_docs = []
         elastic_docs = []
+
         if self._chroma is not None:
-            chroma_docs = self._chroma.get_relevant_documents(query) if hasattr(self._chroma, "get_relevant_documents") else self._chroma.invoke(query)
+            chroma_docs = (
+                self._chroma.get_relevant_documents(query)
+                if hasattr(self._chroma, "get_relevant_documents")
+                else self._chroma.invoke(query)
+            )
+
         if self._elastic is not None:
             elastic_docs = self._elastic.invoke(query)
+
         if not chroma_docs and not elastic_docs:
             return []
+
         fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
         return fused[: self._k]
 

@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
-import os
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from tqdm import tqdm
-from ..llm.factory import LLMConfig
 from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
 from ..chunking.advanced_splitter import split_page_docs_section_aware
 from ..chunking.splitter import split_docs_markdown_hierarchical_semantic
@@ -32,22 +31,123 @@ from ..utils.file_hash import sha256_file
 from ..utils.hash import stable_chunk_id
 from ..utils.unicode_sanitize import sanitize_obj
 
+def _is_retryable_embedding_error(exc: Exception) -> bool:
+    msg = str(exc)
+    retry_markers = [
+        "InternalError",
+        "Receive batching backend response failed",
+        "RateLimit",
+        "Timeout",
+        "timed out",
+        "502",
+        "503",
+        "504",
+        "Connection reset",
+    ]
+    return any(m in msg for m in retry_markers)
+
+
+def _embed_documents_resilient(
+    embeddings,
+    batch_docs: List[Dict[str, Any]],
+    *,
+    start_idx: int,
+    logger,
+    max_retries: int = 5,
+    min_batch_size: int = 8,
+) -> List[List[float]]:
+    texts = [d["text"] for d in batch_docs]
+    delay_s = 2
+    last_exc: Optional[Exception] = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return embeddings.embed_documents(texts)
+        except Exception as exc:
+            last_exc = exc
+            retryable = _is_retryable_embedding_error(exc)
+            logger.warning(
+                "Embedding attempt failed | batch=%d-%d attempt=%d/%d retryable=%s error=%s",
+                start_idx,
+                start_idx + len(batch_docs) - 1,
+                attempt + 1,
+                max_retries + 1,
+                retryable,
+                exc,
+            )
+            if retryable and attempt < max_retries:
+                time.sleep(delay_s)
+                delay_s = min(delay_s * 2, 30)
+                continue
+            break
+
+    if last_exc is None:
+        raise RuntimeError("Unknown embedding failure")
+
+    # 非可重试错误，直接抛
+    if not _is_retryable_embedding_error(last_exc):
+        raise last_exc
+
+    # 已经缩到很小了，还失败，就抛
+    if len(batch_docs) <= min_batch_size:
+        raise last_exc
+
+    # 对可重试但持续失败的批次，二分拆小
+    mid = len(batch_docs) // 2
+    logger.warning(
+        "Splitting failed embedding batch | batch=%d-%d size=%d -> %d + %d",
+        start_idx,
+        start_idx + len(batch_docs) - 1,
+        len(batch_docs),
+        mid,
+        len(batch_docs) - mid,
+    )
+    left = _embed_documents_resilient(
+        embeddings,
+        batch_docs[:mid],
+        start_idx=start_idx,
+        logger=logger,
+        max_retries=max_retries,
+        min_batch_size=min_batch_size,
+    )
+    right = _embed_documents_resilient(
+        embeddings,
+        batch_docs[mid:],
+        start_idx=start_idx + mid,
+        logger=logger,
+        max_retries=max_retries,
+        min_batch_size=min_batch_size,
+    )
+    return left + right
 
 logger = logging.getLogger(__name__)
 
 _KEEP_META_KEYS = {
+    "source",
     "source_file",
+    "file_path",
+    "doc_id",
+    "parent_doc_id",
+    "title",
+    "doc_type",
+    "language",
+    "updated_at",
     "page",
     "page_label",
     "section",
     "chunk_id",
+    "chunk_index",
+    "char_count",
+    "token_count",
     "stage",
     "gas_agent",
     "targets",
     "T_K",
+    "T_range_K",
     "T_min_K",
     "T_max_K",
     "P_MPa",
+    "P_range_MPa",
     "P_min_MPa",
     "P_max_MPa",
     "coal_name",
@@ -71,6 +171,7 @@ def _cache_path_for_pdf(interim_dir: Path, pdf_path: str) -> Path:
     safe = stable_chunk_id(pdf_path, stamp)
     return interim_dir / f"pages_{safe}.jsonl"
 
+
 def _clean_surrogates(obj):
     # 递归清洗：dict/list/str
     if isinstance(obj, str):
@@ -80,6 +181,23 @@ def _clean_surrogates(obj):
     if isinstance(obj, dict):
         return {k: _clean_surrogates(v) for k, v in obj.items()}
     return obj
+
+
+def _estimate_token_count(text: str) -> int:
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    return max(1, len(re.findall(r"\w+|[^\w\s]", stripped, flags=re.UNICODE)))
+
+
+def _isoformat_from_ns(mtime_ns: int) -> str:
+    return datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
+def _derive_title(source_file: str, meta: Dict[str, object]) -> str:
+    title = str(meta.get("title") or "").strip()
+    return title or Path(source_file).stem
+
 
 def _save_pages_cache(cache_path: Path, docs: List[Document]) -> None:
     """
@@ -181,10 +299,6 @@ class IngestPipeline:
     enable_table_extraction: bool = False
     table_flavor: str = "lattice"
 
-    # metadata extraction
-    enable_llm_metadata: bool = False
-    llm_provider: str = "none"  # "openai"
-
     def run(
         self,
         *,
@@ -200,18 +314,7 @@ class IngestPipeline:
 
         onto = Ontology.load("configs/schema.yaml")
 
-        llm_provider = self.llm_provider
-        if self.enable_llm_metadata and llm_provider == "none":
-            llm_provider = self.cfg.llm.provider
-        provider = llm_provider if llm_provider != "none" else self.cfg.llm.provider
-        llm_cfg = LLMConfig(**{**self.cfg.llm.model_dump(), "provider": provider})
-
-        extractor = MetadataExtractor(
-            onto=onto,
-            enable_llm=self.enable_llm_metadata,
-            llm_provider=llm_provider,
-            llm_config=llm_cfg,
-        )
+        extractor = MetadataExtractor(onto=onto)
 
         if rebuild:
             shutil.rmtree(self.cfg.paths.chroma_dir, ignore_errors=True)
@@ -458,6 +561,8 @@ class IngestPipeline:
                     "doc_type": doc_type,
                     "language": lang,
                     "parser": parser,
+                    "title": file_path.stem,
+                    "updated_at": _isoformat_from_ns(stat.st_mtime_ns),
                 }
                 doc_type_counts[doc_type] = doc_type_counts.get(doc_type, 0) + 1
                 language_counts[lang] = language_counts.get(lang, 0) + 1
@@ -632,7 +737,6 @@ class IngestPipeline:
         chunks_with_any_flags = 0
         for i, ch in enumerate(tqdm(chunks, desc="Enrich metadata")):
             src = (ch.metadata or {}).get("source_file", "unknown")
-            page = str((ch.metadata or {}).get("page", ""))
             section = str((ch.metadata or {}).get("section", "unknown"))
 
             meta: Dict[str, object] = dict(ch.metadata or {})
@@ -650,6 +754,7 @@ class IngestPipeline:
             chunk_level = 0 if is_parent else 1
 
             document_id = document_id_by_source.get(str(src), stable_chunk_id(str(src)))
+            source_meta = file_meta_by_path.get(str(src), {})
 
             chunk_meta = extractor.extract(Document(page_content=ch.page_content, metadata={}))
             _merge_list_field(meta, "targets", chunk_meta.get("targets"))
@@ -680,14 +785,25 @@ class IngestPipeline:
             meta = flatten_for_filtering(meta, onto)
 
             # attach chunk_id + canonical source/page for citations
+            meta["source"] = src
             meta["chunk_id"] = chunk_id
             meta.setdefault("source_file", src)
+            meta["file_path"] = str(src)
+            meta["doc_id"] = document_id
+            meta["parent_doc_id"] = document_id
+            meta["title"] = _derive_title(str(src), meta)
+            meta["doc_type"] = source_meta.get("doc_type")
+            meta["language"] = source_meta.get("language") or meta.get("language")
+            meta["updated_at"] = source_meta.get("updated_at")
             meta["is_parent"] = is_parent
             meta["parent_id"] = parent_id
             meta["heading_path"] = heading_path
             meta["chunk_level"] = chunk_level
             meta["position_start"] = pos_start
             meta["position_end"] = pos_end
+            meta["chunk_index"] = i
+            meta["char_count"] = len(ch.page_content or "")
+            meta["token_count"] = _estimate_token_count(ch.page_content or "")
 
             meta = _trim_metadata(meta)
             meta_for_registry = _stringify_metadata(meta)
@@ -732,10 +848,16 @@ class IngestPipeline:
                     "chunk_id": chunk_id,
                     "document_id": document_id,
                     "tenant_id": self.cfg.tenancy.default_tenant_id if self.cfg.tenancy.enabled else None,
+                    "title": meta.get("title"),
                     "source_file": meta.get("source_file"),
                     "page": ch.metadata.get("page"),
                     "page_label": ch.metadata.get("page_label"),
                     "section": ch.metadata.get("section"),
+                    "doc_id": meta.get("doc_id"),
+                    "file_path": meta.get("file_path"),
+                    "doc_type": meta.get("doc_type"),
+                    "language": meta.get("language"),
+                    "updated_at": meta.get("updated_at"),
                     "is_parent": is_parent,
                     "parent_id": parent_id,
                     "heading_path": heading_path,
@@ -744,6 +866,8 @@ class IngestPipeline:
                     "position_start": pos_start,
                     "position_end": pos_end,
                     "chunk_index": i,
+                    "char_count": meta.get("char_count"),
+                    "token_count": meta.get("token_count"),
                     "text": ch.page_content,
                     "stage": meta.get("stage"),
                     "gas_agent": meta.get("gas_agent"),
@@ -834,10 +958,16 @@ class IngestPipeline:
             stage_start = time.monotonic()
             batch_size = self.cfg.elastic.bulk_chunk_size
             for start in range(0, len(es_docs), batch_size):
-                batch_docs = es_docs[start : start + batch_size]
-                texts = [d["text"] for d in batch_docs]
+                batch_docs = es_docs[start: start + batch_size]
                 try:
-                    vectors = embeddings.embed_documents(texts)
+                    vectors = _embed_documents_resilient(
+                        embeddings,
+                        batch_docs,
+                        start_idx=start,
+                        logger=logger,
+                        max_retries=5,
+                        min_batch_size=8,
+                    )
                 except Exception as e:
                     logger.error(
                         "Embedding failed | batch=%d-%d error=%s",

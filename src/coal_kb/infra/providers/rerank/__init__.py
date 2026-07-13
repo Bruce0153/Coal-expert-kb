@@ -1,6 +1,4 @@
-"""Backward-compatible reranker provider imports."""
-
-from coal_kb.infra.providers.rerank import (
+from .factory import (
     CrossEncoderReranker,
     DashScopeReranker,
     make_reranker,

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from coal_kb.llm.factory import LLMConfig, make_chat_llm
+from coal_kb.infra.providers.llm import LLMConfig, make_chat_llm
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,6 @@ _MECH_EXPANSIONS = [
     "intermediate species",
 ]
 
-# 只保留“显式 stage 词”的扩展，不再用简单子串误伤“氮氧化物”
 _STAGE_PATTERNS = {
     "热解": [r"热解", r"\bpyrolysis\b"],
     "气化": [r"气化", r"\bgasification\b"],
@@ -79,12 +78,10 @@ def rewrite_query(
     lower = base.lower()
     expansions: list[str] = []
 
-    # 显式 stage 词才扩展
     for zh_key, patterns in _STAGE_PATTERNS.items():
         if _has_any_pattern(base, patterns):
             expansions.extend(_STAGE_EXPANSIONS[zh_key])
 
-    # 机理类扩展
     for zh_key, patterns in _MECH_PATTERNS.items():
         if _has_any_pattern(base, patterns):
             expansions.extend(_MECH_RULE_EXPANSIONS[zh_key])

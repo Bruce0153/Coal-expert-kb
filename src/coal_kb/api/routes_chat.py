@@ -13,7 +13,7 @@ from coal_kb.api.runtime_overrides import apply_runtime_overrides
 from coal_kb.chat.orchestrator import ChatOrchestrator
 from coal_kb.conversation.service import ConversationService
 from coal_kb.qa.ask_pipeline import build_runtime
-from coal_kb.settings import AppConfig
+from coal_kb.infra.config import AppConfig
 
 
 def build_chat_router(cfg: AppConfig, conversations: ConversationService) -> APIRouter:

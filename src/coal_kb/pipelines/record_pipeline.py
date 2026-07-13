@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..llm.factory import LLMConfig, make_chat_llm
+from coal_kb.infra.providers.llm import LLMConfig, make_chat_llm
 from ..schema.models import ExperimentRecord
 from ..schema.pollutants import normalize_pollutants_dict
 from ..schema.validators import (
@@ -18,7 +18,7 @@ from ..schema.validators import (
     validate_pressure_mpa,
     validate_temperature_k,
 )
-from ..settings import AppConfig
+from coal_kb.infra.config import AppConfig
 from ..store.sql_store import SQLiteStore
 from ..utils.hash import stable_chunk_id
 

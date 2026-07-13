@@ -20,9 +20,9 @@ from coal_kb.api.routes_admin import build_admin_router
 from coal_kb.api.routes_chat import build_chat_router
 from coal_kb.conversation.service import ConversationService
 from coal_kb.conversation.store import ConversationStore
-from coal_kb.logging import setup_logging
+from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.qa.ask_pipeline import build_response_payload, build_runtime, execute_query, log_query
-from coal_kb.settings import load_config
+from coal_kb.infra.config import load_config
 
 
 def create_app() -> FastAPI:

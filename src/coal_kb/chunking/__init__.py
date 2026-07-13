@@ -1,3 +1,3 @@
-from .splitter import split_docs_markdown_hierarchical_semantic, split_page_docs
+"""兼容旧切分模块导入路径。"""
 
-__all__ = ["split_page_docs", "split_docs_markdown_hierarchical_semantic"]
+from coal_kb.ingestion.chunking import *  # noqa: F401,F403

@@ -9,20 +9,20 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 
 from coal_kb.context.builder import ContextBuilder
-from coal_kb.embeddings.factory import EmbeddingsConfig
+from coal_kb.infra.providers.embeddings import EmbeddingsConfig
 from coal_kb.generation.answerer import AnswerResult, Answerer
-from coal_kb.llm.factory import LLMConfig
-from coal_kb.metadata.normalize import Ontology
-from coal_kb.query.plan import QueryPlan
+from coal_kb.infra.providers.llm import LLMConfig
+from coal_kb.ingestion.metadata.normalize import Ontology
+from coal_kb.core.models.query import QueryPlan
 from coal_kb.query.planner import QueryPlanner
 from coal_kb.retrieval.bm25 import rrf_fuse
 from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.retrieval.rerank import make_reranker
+from coal_kb.infra.providers.rerank import make_reranker
 from coal_kb.retrieval.retriever import ExpertRetriever
-from coal_kb.settings import AppConfig
-from coal_kb.store.chroma_store import ChromaStore
-from coal_kb.store.elastic_store import ElasticStore
-from coal_kb.store.registry_sqlite import RegistrySQLite
+from coal_kb.infra.config import AppConfig
+from coal_kb.infra.persistence.vector import ChromaStore
+from coal_kb.infra.persistence.search import ElasticStore
+from coal_kb.infra.persistence.registry import RegistrySQLite
 
 logger = logging.getLogger(__name__)
 

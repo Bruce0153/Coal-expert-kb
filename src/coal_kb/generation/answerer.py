@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from coal_kb.context.types import ContextPackage
-from coal_kb.query.plan import QueryPlan
-from coal_kb.llm.factory import LLMConfig, make_chat_llm
+from coal_kb.core.models.query import QueryPlan
+from coal_kb.infra.providers.llm import LLMConfig, make_chat_llm
 
 
 @dataclass
@@ -107,7 +107,13 @@ class Answerer:
             })
         return claims[:20]
 
-    def answer(self, plan: QueryPlan, context_package: ContextPackage) -> AnswerResult:
+    def answer(
+        self,
+        plan: QueryPlan,
+        context_package: ContextPackage,
+        *,
+        enable_llm: Optional[bool] = None,
+    ) -> AnswerResult:
         ev_count = len(context_package.used_chunks)
         citations = {k: v.model_dump() for k, v in context_package.citations.items()}
         evidence_items = [v.model_dump() for v in context_package.evidence_items]
@@ -125,7 +131,7 @@ class Answerer:
 
         if ev_count < plan.answer.min_evidence:
             return AnswerResult(
-                answer_text="无法可靠回答：证据不足。请补充更明确的工况/目标污染物证据。",
+                answer_text="Insufficient evidence（证据不足）：请补充更明确的工况或目标污染物证据。",
                 debug={"reason": "insufficient_evidence", "evidence": ev_count},
                 referenced_labels=all_labels,
                 rendered_citations=self._build_rendered_citations(citations, all_labels),
@@ -133,7 +139,9 @@ class Answerer:
                 **common,
             )
 
-        if not self.enable_llm or self._llm is None:
+        use_llm = self.enable_llm if enable_llm is None else enable_llm
+
+        if not use_llm or self._llm is None:
             refs = " ".join(f"[{k}]" for k in all_labels)
             text = (
                 "基于检索证据，已检索到与问题相关的文献片段。\n\n"

@@ -7,7 +7,7 @@ from typing import Dict, List
 
 from langchain_core.documents import Document
 
-from coal_kb.query.plan import QueryPlan
+from coal_kb.core.models.query import QueryPlan
 
 from .types import CitationItem, ContextPackage, SourceCard
 

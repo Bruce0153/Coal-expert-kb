@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from coal_kb.application.ask import AskRuntime, build_response_payload, execute_query, log_query
-from coal_kb.chat.memory import PreparedHistory, prepare_history_context
+from coal_kb.conversation.history import PreparedHistory, prepare_history_context
 from coal_kb.conversation.models import ConversationMessage, ConversationSummary
 from coal_kb.conversation.service import ConversationService
 

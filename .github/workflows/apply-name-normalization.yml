@@ -12,6 +12,11 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -83,12 +88,36 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements/ci.txt
-      - name: Validate normalized repository
-        env:
-          HF_HUB_OFFLINE: "1"
-          TRANSFORMERS_OFFLINE: "1"
-          TOKENIZERS_PARALLELISM: "false"
-        run: bash scripts/quality/check_repository.sh
+      - name: Compile Python sources
+        run: |
+          source scripts/quality/config.sh
+          python -m compileall -q "${SOURCE_PATHS[@]}"
+          find src scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          find src scripts tests -type f -name "*.pyc" -delete
+      - name: Lint repository
+        run: |
+          source scripts/quality/config.sh
+          ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905
+      - name: Type-check canonical packages
+        run: |
+          source scripts/quality/config.sh
+          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}"
+      - name: Test naming and architecture
+        run: |
+          source scripts/quality/config.sh
+          mkdir -p .pytest_tmp/architecture
+          pytest -q --basetemp=.pytest_tmp/architecture -o cache_dir=.pytest_cache/architecture "${ARCHITECTURE_TESTS[@]}"
+      - name: Test foundation modules
+        run: |
+          source scripts/quality/config.sh
+          mkdir -p .pytest_tmp/foundation
+          pytest -q --basetemp=.pytest_tmp/foundation -o cache_dir=.pytest_cache/foundation "${FOUNDATION_TESTS[@]}"
+      - name: Test context smoke path
+        run: |
+          source scripts/quality/config.sh
+          mkdir -p .pytest_tmp/context
+          pytest -q --basetemp=.pytest_tmp/context -o cache_dir=.pytest_cache/context "${RAG_TESTS[@]}"
+          rm -rf .pytest_tmp
       - name: Commit normalized repository
         run: |
           git config user.name "repository-maintenance-bot"

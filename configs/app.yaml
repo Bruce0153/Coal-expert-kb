@@ -7,9 +7,6 @@ paths:
   sqlite_path: "storage/expert.db"
   manifest_path: "storage/manifest.json"
 
-embedding:
-  backend: dashscope
-  model_name: "text-embedding-v4"
 
 model_versions:
   embedding_version: "v1"
@@ -21,7 +18,7 @@ chunking:
   overlap_tokens: 20
   similarity_threshold: 0.72
   heading_max_depth: 4
-  embedding_backend: dashscope
+  embedding_backend: configured
 
   # section-aware fallback
   chunk_size: 900

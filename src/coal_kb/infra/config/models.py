@@ -182,7 +182,6 @@ class RemoteEmbeddingsConfig(BaseModel):
 class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
-    embedding: LocalEmbeddingConfig = Field(default_factory=LocalEmbeddingConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)

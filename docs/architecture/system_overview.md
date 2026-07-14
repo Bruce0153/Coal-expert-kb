@@ -1,18 +1,56 @@
-# Modern RAG Architecture (Planner/Executor/ContextBuilder)
+# 系统架构总览
 
-## Data Flow
-1. `QueryPlanner.build_plan(question, config)` 产出可序列化 `QueryPlan`
-2. `ExpertRetriever.execute(plan)` 只执行检索（parent->child）
-3. `ContextBuilder.build(plan, docs)` 进行证据分组、去重、预算裁剪、引用编号
-4. `Answerer.answer(plan, context_package)` 按引用生成答案/拒答
+Coal Expert KB 使用单向分层架构。接口层只调用应用层；应用层编排领域服务；领域服务通过 `infra` 中的协议实现访问模型与存储。
 
-## Module Boundary
-- `src/coal_kb/query/*`: 负责“理解问题 + 决策计划”
-- `src/coal_kb/retrieval/retriever.py`: 负责“执行计划”
-- `src/coal_kb/context/*`: 负责“证据编排”
-- `src/coal_kb/generation/*`: 负责“回答生成 + 不确定性处理”
+## 主数据流
 
-## Replay / Debug
-- `scripts/ask.py --show-plan` 查看当次计划
-- `scripts/ask.py --save-trace` 在 registry 的 query log 保存 plan + 检索统计 + citations
-- 使用 `trace_id` 定位 badcase 做回放分析
+```text
+Raw documents
+  → ingestion
+  → indexing
+  → retrieval.query
+  → recall
+  → retrieval.service
+  → reranking
+  → context
+  → answering
+  → application
+  → interfaces
+```
+
+## 模块边界
+
+- `core/`：Embedding、LLM、Reranker 协议和 QueryPlan 等核心模型。
+- `infra/`：配置加载、Provider、Chroma、Elasticsearch、SQLite、日志和安全工具。
+- `ingestion/`：加载、解析、清洗、元数据、切块和摄取流水线。
+- `indexing/`：索引构建、Manifest、验证、切换和回滚。
+- `retrieval/query/`：问题标准化、约束解析和 QueryPlan 构建。
+- `retrieval/constraints/`：约束执行与放宽规则。
+- `recall/`：Dense、Sparse、融合和父子结构候选生成。
+- `retrieval/service.py`：执行 QueryPlan，完成过滤、放宽、多样性和 Trace。
+- `reranking/`：候选重排序，不负责召回和回答。
+- `context/`：证据去重、预算裁剪、稳定编号和来源卡片。
+- `answering/`：Claim、引用、置信度、拒答和回答生成。
+- `evaluation/`：评估数据、指标、Runner、报告和失败归因。
+- `application/`：Ask、Chat、Admin 用例编排。
+- `interfaces/`：CLI、FastAPI 和 Web 传输适配。
+
+## 依赖方向
+
+```text
+interfaces → application → domain services → core contracts ← infra implementations
+```
+
+禁止：
+
+- `application` 依赖 FastAPI 或 Web 资源；
+- `retrieval` 依赖 `answering`；
+- `evaluation` 依赖接口层；
+- 为同一职责重新建立平行模块。
+
+## Replay 与调试
+
+- `python scripts/ask.py --show-plan`：查看 QueryPlan；
+- `python scripts/ask.py --save-trace`：保存检索 Trace、引用和运行指标；
+- `trace_id`：关联查询计划、候选、上下文和回答；
+- `bash scripts/quality/check_repository.sh`：执行离线工程验收。

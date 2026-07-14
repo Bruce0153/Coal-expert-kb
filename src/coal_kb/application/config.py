@@ -11,5 +11,3 @@ HELP_TEXT = """Commands:
 Type any question to start retrieval.
 """
 
-# 管理
-UPLOAD_SUFFIX_LENGTH = 6

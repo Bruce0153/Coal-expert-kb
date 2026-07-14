@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text as sql_text
 
-from coal_kb.application import config
 from coal_kb.infra.config import AppConfig
 from coal_kb.infra.persistence.registry import RegistrySQLite
 from coal_kb.infra.persistence.search import ElasticStore
 from coal_kb.infra.persistence.vector import ChromaStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
+from coal_kb.infra.security import build_upload_path
 
 
 class AdminService:
@@ -69,11 +68,8 @@ class AdminService:
     def save_uploaded_document(self, filename: str, content: bytes) -> str:
         safe_name = Path(filename).name
         extension = Path(safe_name).suffix.lower()
-        destination = self._raw_pdf_dir() / safe_name if extension == ".pdf" else self._raw_docs_dir() / safe_name
-        if destination.exists():
-            destination = destination.with_name(
-                f"{destination.stem}_{uuid.uuid4().hex[: config.UPLOAD_SUFFIX_LENGTH]}{extension}"
-            )
+        directory = self._raw_pdf_dir() if extension == ".pdf" else self._raw_docs_dir()
+        destination = build_upload_path(directory, safe_name)
         destination.write_bytes(content)
         return destination.name
 

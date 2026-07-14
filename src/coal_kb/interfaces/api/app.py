@@ -16,6 +16,7 @@ from coal_kb.interfaces.api.routes_ask import build_ask_router
 from coal_kb.interfaces.api.routes_chat import build_chat_router
 from coal_kb.interfaces.api.runtime_overrides import build_settings_defaults
 from coal_kb.interfaces.web import web_static_dir
+from coal_kb.operations import health_status
 
 
 def create_app() -> FastAPI:
@@ -44,7 +45,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return health_status()
 
     @app.get("/api/settings/defaults", response_model=SettingsDefaultsResponse)
     def settings_defaults() -> SettingsDefaultsResponse:

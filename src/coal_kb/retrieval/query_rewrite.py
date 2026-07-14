@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from coal_kb.llm.factory import LLMConfig, make_chat_llm
+from coal_kb.infra.providers.llm import LLMConfig, make_chat_llm
 
 logger = logging.getLogger(__name__)
 

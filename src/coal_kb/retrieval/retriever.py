@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.documents import Document
 
-from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
-from coal_kb.query.plan import Constraint as PlanConstraint
-from coal_kb.query.plan import QueryPlan
-from coal_kb.store.elastic_store import ElasticStore
+from coal_kb.infra.providers.embeddings import EmbeddingsConfig, make_embeddings
+from coal_kb.core.models.query import Constraint as PlanConstraint
+from coal_kb.core.models.query import QueryPlan
+from coal_kb.infra.persistence.search import ElasticStore
 from .bm25 import rrf_fuse
 from .constraint_policy import build_plan
 from .constraints import Constraint, ConstraintSet

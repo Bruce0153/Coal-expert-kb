@@ -5,10 +5,11 @@ from pathlib import Path
 import pytest
 
 from coal_kb import settings
+from coal_kb.infra.config import models as config_models
 
 
 def test_settings_class_definitions_unique() -> None:
-    text = Path(settings.__file__).read_text(encoding="utf-8")
+    text = Path(config_models.__file__).read_text(encoding="utf-8")
     for name in ("RegistryConfig", "ModelVersionsConfig", "ElasticConfig", "QueryRewriteConfig"):
         assert text.count(f"class {name}") == 1
 

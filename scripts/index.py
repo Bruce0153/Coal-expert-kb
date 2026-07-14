@@ -1,115 +1,31 @@
+"""构建、切换或回滚 Elasticsearch 物理索引。"""
+
 from __future__ import annotations
 
 import argparse
-import logging
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Any
 
-from coal_kb.embeddings.factory import EmbeddingsConfig, make_embeddings
-from coal_kb.cli_ui import print_banner, print_kv, print_stats_table, progress_status
-from coal_kb.logging import setup_logging
-from coal_kb.pipelines.ingest_pipeline import IngestPipeline
-from coal_kb.settings import load_config
-from coal_kb.store.elastic_store import ElasticStore
-from coal_kb.store.elastic_validation import validate_index
-from coal_kb.utils.hash import stable_chunk_id
-
-logger = logging.getLogger(__name__)
+from coal_kb.cli_ui import print_banner, print_kv, print_stats_table
+from coal_kb.indexing.service import IndexService
+from coal_kb.infra.config import AppConfig, load_config
+from coal_kb.infra.observability.logging import setup_logging
 
 
-def _resolve_dims(cfg) -> int:
-    dims = cfg.embeddings.dimensions or 0
-    if dims:
-        return dims
-    embeddings = make_embeddings(EmbeddingsConfig(**cfg.embeddings.model_dump()))
-    return len(embeddings.embed_query("dimension probe"))
+@dataclass
+class Index:
+    """保存命令行参数并调用索引应用服务。"""
 
+    cfg: AppConfig
+    args: argparse.Namespace
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Manage Elasticsearch index versions.")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    build = sub.add_parser("build", help="Create new index and ingest with elastic backend.")
-    build.add_argument("--embedding-version", default=None, help="Override embedding version.")
-
-    switch = sub.add_parser("switch", help="Switch alias_current to a specific index.")
-    switch.add_argument("--index", required=True, help="Target index name.")
-
-    sub.add_parser("rollback", help="Rollback alias_current to alias_prev.")
-    build.add_argument(
-        "--resume-index",
-        default=None,
-        help="Resume/continue writing into an existing physical index.",
-    )
-    args = parser.parse_args()
-
-    cfg = load_config()
-    setup_logging(cfg, logger_name=__name__)
-    print_banner("Coal KB Index Manager", f"backend={cfg.backend}")
-
-    elastic_store = ElasticStore(
-        host=cfg.elastic.host,
-        verify_certs=cfg.elastic.verify_certs,
-        timeout_s=cfg.elastic.timeout_s,
-    )
-
-    if args.cmd == "build":
-        if args.embedding_version:
-            cfg.model_versions.embedding_version = args.embedding_version
-        cfg.backend = "elastic"
-        print_kv(
-            "Index Build",
-            {
-                "embedding_version": cfg.model_versions.embedding_version,
-                "index_prefix": cfg.elastic.index_prefix,
-                "alias_current": cfg.elastic.alias_current,
-                "alias_prev": cfg.elastic.alias_prev,
-            },
-        )
-        dims = _resolve_dims(cfg)
-        schema_sig = stable_chunk_id(Path("configs/schema.yaml").read_text(encoding="utf-8"))
-        schema_hash = schema_sig[:8]
-
-        if args.resume_index:
-            index_name = args.resume_index
-            if not elastic_store.client.indices.exists(index=index_name):
-                raise SystemExit(f"Resume index not found: {index_name}")
-            logger.info("Resuming existing index: %s", index_name)
-            rebuild = False
-        else:
-            index_name = elastic_store.build_index_name(
-                index_prefix=cfg.elastic.index_prefix,
-                embedding_version=cfg.model_versions.embedding_version,
-                schema_hash=schema_hash,
-            )
-            elastic_store.create_index(
-                index_name, dims, enable_icu_analyzer=cfg.elastic.enable_icu_analyzer
-            )
-            rebuild = True
-
-        pipe = IngestPipeline(cfg=cfg)
-        with progress_status("Building index"):
-            stats = pipe.run(rebuild=rebuild, elastic_index_override=index_name)
-        validation = validate_index(
-            client=elastic_store.client,
-            index_or_alias=index_name,
-            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            expected_dims=dims,
-            query_text="validation probe",
-        )
-        if not validation["ok"]:
-            logger.error("Index validation failed. Alias not switched.")
-            for err in validation["errors"]:
-                logger.error("Validation error: %s", err)
-            raise SystemExit(1)
-        elastic_store.switch_alias(
-            alias_current=cfg.elastic.alias_current,
-            alias_prev=cfg.elastic.alias_prev,
-            new_index=index_name,
-        )
+    def _print_build_result(self, result: dict[str, Any]) -> None:
+        stats = result["stats"]
+        validation = result["validation"]
         print_stats_table(
             "Build Summary",
             [
-                ("index", index_name),
+                ("index", str(result["index"])),
                 ("indexed", str(stats.get("indexed"))),
                 ("chunks", str(stats.get("chunks"))),
                 ("doc_types", str(stats.get("doc_type_counts"))),
@@ -118,39 +34,70 @@ def main() -> None:
                 ("elapsed_s", str(stats.get("elapsed_s"))),
             ],
         )
-        logger.info("Index build complete: %s", index_name)
-        return
 
-    if args.cmd == "switch":
-        elastic_store.switch_alias(
-            alias_current=cfg.elastic.alias_current,
-            alias_prev=cfg.elastic.alias_prev,
-            new_index=args.index,
-        )
-        print_stats_table(
-            "Alias Switch",
-            [
-                ("alias_current", cfg.elastic.alias_current),
-                ("new_index", args.index),
-            ],
-        )
-        logger.info("Switched alias to %s", args.index)
-        return
+    def process(self) -> dict[str, Any]:
+        print_banner("Coal KB Index Manager", f"backend={self.cfg.backend}")
+        service = IndexService(self.cfg)
+        if self.args.cmd == "build":
+            print_kv(
+                "Index Build",
+                {
+                    "embedding_version": self.args.embedding_version
+                    or self.cfg.model_versions.embedding_version,
+                    "index_prefix": self.cfg.elastic.index_prefix,
+                    "alias_current": self.cfg.elastic.alias_current,
+                    "alias_prev": self.cfg.elastic.alias_prev,
+                },
+            )
+            result = service.process(
+                "build",
+                embedding_version=self.args.embedding_version,
+                resume_index=self.args.resume_index,
+            )
+            self._print_build_result(result)
+            return result
+        if self.args.cmd == "switch":
+            result = service.process("switch", index_name=self.args.index)
+            print_stats_table(
+                "Alias Switch",
+                [
+                    ("alias_current", str(result["alias_current"])),
+                    ("new_index", str(result["new_index"])),
+                ],
+            )
+            return result
+        if self.args.cmd == "rollback":
+            result = service.process("rollback")
+            print_stats_table(
+                "Alias Rollback",
+                [
+                    ("alias_current", str(result["alias_current"])),
+                    ("alias_prev", str(result["alias_prev"])),
+                ],
+            )
+            return result
+        raise ValueError(f"Unsupported command: {self.args.cmd}")
 
-    if args.cmd == "rollback":
-        elastic_store.rollback(
-            alias_current=cfg.elastic.alias_current,
-            alias_prev=cfg.elastic.alias_prev,
-        )
-        print_stats_table(
-            "Alias Rollback",
-            [
-                ("alias_current", cfg.elastic.alias_current),
-                ("alias_prev", cfg.elastic.alias_prev),
-            ],
-        )
-        logger.info("Rollback complete.")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Manage Elasticsearch index versions.")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+
+    build = subparsers.add_parser("build", help="Create new index and ingest with elastic backend.")
+    build.add_argument("--embedding-version", default=None, help="Override embedding version.")
+    build.add_argument("--resume-index", default=None, help="Continue writing into an existing physical index.")
+
+    switch = subparsers.add_parser("switch", help="Switch alias_current to a specific index.")
+    switch.add_argument("--index", required=True, help="Target index name.")
+    subparsers.add_parser("rollback", help="Rollback alias_current to alias_prev.")
+    args = parser.parse_args()
+
+    cfg = load_config()
+    setup_logging(cfg, logger_name=__name__)
+    Index(cfg=cfg, args=args).process()
 
 
 if __name__ == "__main__":
     main()
+
+# 运行命令：python scripts/index.py build

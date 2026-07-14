@@ -1,8 +1,26 @@
+"""启动 Coal Expert KB 的 FastAPI Web 服务。"""
+
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 
 import uvicorn
+
+
+@dataclass
+class Serve:
+    host: str
+    port: int
+    reload: bool
+
+    def process(self) -> None:
+        uvicorn.run(
+            "coal_kb.api.app:app",
+            host=self.host,
+            port=self.port,
+            reload=self.reload,
+        )
 
 
 def main() -> None:
@@ -11,14 +29,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()
-
-    uvicorn.run(
-        "coal_kb.api.app:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-    )
+    Serve(host=args.host, port=args.port, reload=args.reload).process()
 
 
 if __name__ == "__main__":
     main()
+
+# 运行命令：python scripts/serve.py

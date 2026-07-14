@@ -7,9 +7,9 @@ from typing import List
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
-from coal_kb.pipelines.ingest_pipeline import IngestPipeline
-from coal_kb.settings import AppConfig
-from coal_kb.store.registry_sqlite import RegistrySQLite
+from coal_kb.ingestion.pipeline import IngestPipeline
+from coal_kb.infra.config import AppConfig
+from coal_kb.infra.persistence.registry import RegistrySQLite
 
 
 class DocumentInfo(BaseModel):
@@ -162,8 +162,8 @@ def build_admin_router(cfg: AppConfig) -> APIRouter:
         # Try to delete from vector stores
         try:
             if cfg.backend in ("chroma", "both"):
-                from coal_kb.store.chroma_store import ChromaStore
-                from coal_kb.embeddings.factory import EmbeddingsConfig
+                from coal_kb.infra.persistence.vector import ChromaStore
+                from coal_kb.infra.providers.embeddings import EmbeddingsConfig
 
                 chroma = ChromaStore(
                     persist_dir=cfg.paths.chroma_dir,
@@ -177,7 +177,7 @@ def build_admin_router(cfg: AppConfig) -> APIRouter:
 
         try:
             if cfg.backend in ("elastic", "both"):
-                from coal_kb.store.elastic_store import ElasticStore
+                from coal_kb.infra.persistence.search import ElasticStore
 
                 es = ElasticStore(
                     host=cfg.elastic.host,

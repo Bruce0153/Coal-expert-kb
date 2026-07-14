@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from coal_kb.api.models import RuntimeSettingsRequest, SettingsDefaultsResponse
-from coal_kb.settings import AppConfig
+from coal_kb.infra.config import AppConfig
 
 
 def apply_runtime_overrides(cfg: AppConfig, payload: RuntimeSettingsRequest) -> AppConfig:

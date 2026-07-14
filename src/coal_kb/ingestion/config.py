@@ -1,0 +1,8 @@
+"""集中维护摄入模块实际使用的运行常量。"""
+
+# 嵌入重试
+EMBEDDING_MAX_RETRIES = 5
+EMBEDDING_MIN_BATCH_SIZE = 8
+
+# 写入批次
+VECTOR_WRITE_BATCH_SIZE = 128

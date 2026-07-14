@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 from coal_kb.retrieval.filter_parser import FilterParser
 from coal_kb.retrieval.query_rewrite import rewrite_query
-from coal_kb.settings import AppConfig
+from coal_kb.infra.config import AppConfig
 
-from .plan import (
+from coal_kb.core.models.query import (
     AnswerSpec,
     Constraint,
     ContextSpec,

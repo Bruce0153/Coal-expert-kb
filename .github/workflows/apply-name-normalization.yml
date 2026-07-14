@@ -58,13 +58,17 @@ jobs:
         run: |
           source "$SCRIPT_DIR/config.sh"
           mkdir -p .pytest_tmp/architecture
-          pytest -q --basetemp=.pytest_tmp/architecture -o cache_dir=.pytest_cache/architecture "${ARCHITECTURE_TESTS[@]}" > architecture-report.txt 2>&1
+          pytest -q --basetemp=.pytest_tmp/architecture -o cache_dir=.pytest_cache/architecture "${ARCHITECTURE_TESTS[@]}" > .architecture-report.txt 2>&1
       - name: Upload architecture report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: architecture-report
-          path: architecture-report.txt
+          path: .architecture-report.txt
+          include-hidden-files: true
+      - name: Remove architecture report
+        if: always()
+        run: rm -f .architecture-report.txt
       - name: Stop on architecture failure
         if: steps.architecture.outcome == 'failure'
         run: exit 1

@@ -1,0 +1,5 @@
+"""回答层实际使用的规则常量。"""
+
+MAX_CLAIMS = 20
+MIN_CLAIM_CHARS = 10
+FALLBACK_CLAIM_CHARS = 200

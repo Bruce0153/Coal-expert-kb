@@ -1,4 +1,6 @@
-from .builder import ContextBuilder
-from .types import CitationItem, ContextPackage
+"""上下文工程层。"""
 
-__all__ = ["ContextBuilder", "CitationItem", "ContextPackage"]
+from .models import CitationItem, ContextPackage, SourceCard
+from .service import ContextBuilder
+
+__all__ = ["CitationItem", "ContextBuilder", "ContextPackage", "SourceCard"]

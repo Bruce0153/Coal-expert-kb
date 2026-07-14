@@ -1,0 +1,12 @@
+"""召回层实际使用的默认参数。"""
+
+# BM25
+BM25_K1 = 1.5
+BM25_B = 0.75
+
+# RRF
+RRF_K = 60
+
+# 父子块回退
+FALLBACK_CHILD_CANDIDATES = 200
+FALLBACK_CHILD_FINAL = 40

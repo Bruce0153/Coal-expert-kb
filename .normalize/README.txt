@@ -1,0 +1,1 @@
+Temporary migration files are removed automatically before merge.

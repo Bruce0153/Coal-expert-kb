@@ -94,9 +94,10 @@ jobs:
           python -m compileall -q "${SOURCE_PATHS[@]}"
           find src scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +
           find src scripts tests -type f -name "*.pyc" -delete
-      - name: Lint repository
+      - name: Lint and normalize Python sources
         run: |
           source scripts/quality/config.sh
+          ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905 --fix
           ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905
       - name: Type-check canonical packages
         run: |

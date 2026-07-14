@@ -14,6 +14,7 @@ MYPY_TARGETS=(
   "$REPO_ROOT/src/coal_kb/retrieval"
   "$REPO_ROOT/src/coal_kb/context"
   "$REPO_ROOT/src/coal_kb/answering"
+  "$REPO_ROOT/src/coal_kb/evaluation"
   "$REPO_ROOT/src/coal_kb/application"
   "$REPO_ROOT/src/coal_kb/interfaces/api"
 )
@@ -30,6 +31,7 @@ FOUNDATION_TESTS=(
   "$REPO_ROOT/tests/test_conversation_store.py"
   "$REPO_ROOT/tests/test_registry.py"
   "$REPO_ROOT/tests/test_config_consistency.py"
+  "$REPO_ROOT/tests/test_evaluation_pipeline.py"
 )
 RAG_TESTS=(
   "$REPO_ROOT/tests/test_context_builder.py"

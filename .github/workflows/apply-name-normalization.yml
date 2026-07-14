@@ -95,10 +95,21 @@ jobs:
           find src scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +
           find src scripts tests -type f -name "*.pyc" -delete
       - name: Lint and normalize Python sources
+        id: lint
+        continue-on-error: true
         run: |
           source scripts/quality/config.sh
           ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905 --fix
-          ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905
+          ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905 --output-format=concise > ruff-report.txt 2>&1
+      - name: Upload Ruff report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-report
+          path: ruff-report.txt
+      - name: Stop on Ruff failure
+        if: steps.lint.outcome == 'failure'
+        run: exit 1
       - name: Type-check canonical packages
         run: |
           source scripts/quality/config.sh

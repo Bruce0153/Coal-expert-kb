@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from coal_kb.loaders.pdf_loader import PDFLoader
+from coal_kb.ingestion.loaders.pdf_loader import PDFLoader
 
 
 def test_pdf_loader_fallback_to_text(monkeypatch, tmp_path) -> None:
@@ -21,15 +21,13 @@ def test_pdf_loader_fallback_to_text(monkeypatch, tmp_path) -> None:
         return original_import(name, *a, **k)
 
     monkeypatch.setattr("builtins.__import__", _mock_import)
-
     called = {"ok": False}
 
     def _fallback(path):
         called["ok"] = True
         return [Document(page_content="fallback text", metadata={"source_file": str(path), "page": 1})]
 
-    monkeypatch.setattr("coal_kb.loaders.pdf_loader.load_pdf_pages", _fallback)
-
+    monkeypatch.setattr("coal_kb.ingestion.loaders.pdf_loader.load_pdf_pages", _fallback)
     docs = PDFLoader().load(str(pdf))
     assert called["ok"] is True
     assert docs

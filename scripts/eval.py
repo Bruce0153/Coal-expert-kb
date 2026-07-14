@@ -10,7 +10,6 @@ from typing import Any
 
 from tqdm import tqdm
 
-from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.persistence.registry import RegistrySQLite
 from coal_kb.infra.persistence.search import ElasticStore
@@ -18,8 +17,9 @@ from coal_kb.infra.persistence.vector import ChromaStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
 from coal_kb.infra.providers.rerank import make_reranker
 from coal_kb.ingestion.metadata.normalize import Ontology
-from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.retrieval.retriever import ExpertRetriever
+from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
+from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.service import ExpertRetriever
 from coal_kb.utils.hash import stable_chunk_id
 
 
@@ -45,12 +45,7 @@ class Eval:
             if not line.strip():
                 continue
             payload: dict[str, Any] = json.loads(line)
-            items.append(
-                EvalItem(
-                    query=str(payload["query"]),
-                    expected_sources=list(payload.get("expected_sources") or []),
-                )
-            )
+            items.append(EvalItem(query=str(payload["query"]), expected_sources=list(payload.get("expected_sources") or [])))
         return items
 
     @staticmethod
@@ -71,7 +66,6 @@ class Eval:
         backend = self.cfg.backend
         if backend not in {"elastic", "chroma", "both"}:
             raise ValueError(f"Unsupported backend: {backend}")
-
         vector_factory = None
         elastic_store: ElasticStore | None = None
         resolved_index = self.index_name or self.cfg.elastic.alias_current
@@ -83,7 +77,6 @@ class Eval:
                 embedding_model=self.cfg.embedding.model_name,
             )
             vector_factory = store.as_retriever
-
         if backend in {"elastic", "both"}:
             elastic_store = ElasticStore(
                 host=self.cfg.elastic.host,
@@ -97,10 +90,8 @@ class Eval:
                 rrf_k=self.cfg.retrieval.rrf_k,
                 use_icu=self.cfg.elastic.enable_icu_analyzer,
             )
-
         if vector_factory is None:
             raise RuntimeError("No retriever factory configured.")
-
         rerank_enabled = bool(self.cfg.retrieval.rerank_enabled)
         reranker = make_reranker(self.cfg) if rerank_enabled else None
         retriever = ExpertRetriever(
@@ -126,7 +117,6 @@ class Eval:
         recall_hits = 0
         reciprocal_rank_total = 0.0
         parser = FilterParser(onto=Ontology.load("configs/schema.yaml"))
-
         for item in tqdm(items, total=len(items), desc=self.__class__.__name__):
             parsed = parser.parse(item.query)
             documents = retriever.retrieve(item.query, parsed)
@@ -140,7 +130,6 @@ class Eval:
                 recall_hits += 1
                 reciprocal_rank_total += 1.0 / min(positions)
                 precision_hits += len(positions)
-
         return {
             "precision_at_k": precision_hits / max(total * self.k, 1),
             "recall_at_k": recall_hits / total,
@@ -152,7 +141,6 @@ class Eval:
         retriever, elastic_store, resolved_index = self._build_retriever()
         items = self._load_eval_set(self.gold_path, desc=self.__class__.__name__)
         metrics = self._evaluate(items, retriever)
-
         print_stats_table(
             "Eval Summary",
             [
@@ -161,13 +149,11 @@ class Eval:
                 ("mrr", f"{metrics['mrr']:.3f}"),
             ],
         )
-
         run_id = self.run_id or stable_chunk_id(str(self.gold_path.resolve()))
         schema_hash = stable_chunk_id(Path("configs/schema.yaml").read_text(encoding="utf-8"))[:8]
         document_count = 0
         if elastic_store is not None and self.cfg.backend in {"elastic", "both"}:
             document_count = int(elastic_store.client.count(index=resolved_index).get("count", 0))
-
         RegistrySQLite(self.cfg.registry.sqlite_path).log_run_metrics(
             run_id=run_id,
             index_name=resolved_index,
@@ -189,7 +175,6 @@ def main() -> None:
     parser.add_argument("--run-id", default=None, help="Run id to associate with metrics.")
     parser.add_argument("--index", default=None, help="Elastic index or alias to evaluate.")
     args = parser.parse_args()
-
     cfg = load_config()
     Eval(
         cfg=cfg,

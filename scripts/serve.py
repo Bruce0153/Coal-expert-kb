@@ -16,7 +16,7 @@ class Serve:
 
     def process(self) -> None:
         uvicorn.run(
-            "coal_kb.api.app:app",
+            "coal_kb.interfaces.api.app:app",
             host=self.host,
             port=self.port,
             reload=self.reload,

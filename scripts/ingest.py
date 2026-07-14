@@ -7,10 +7,10 @@ import logging
 import time
 from dataclasses import dataclass
 
-from coal_kb.cli_ui import print_banner, print_kv, print_stats_table
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.ingestion.pipeline import IngestPipeline
+from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,7 @@ class Ingest:
             self.cfg.paths.chroma_dir,
             self.cfg.paths.interim_dir,
         )
-        logger.info(
-            "Embeddings | provider=%s model=%s",
-            self.cfg.embeddings.provider,
-            self.cfg.embeddings.model,
-        )
+        logger.info("Embeddings | provider=%s model=%s", self.cfg.embeddings.provider, self.cfg.embeddings.model)
         logger.info(
             "Chunking | size=%d overlap=%d | tables=%s",
             self.cfg.chunking.chunk_size,
@@ -57,7 +53,6 @@ class Ingest:
             self.enable_tables,
         )
         logger.info("Backend | mode=%s registry_db=%s", self.cfg.backend, self.cfg.registry.sqlite_path)
-
         started_at = time.monotonic()
         pipeline = IngestPipeline(
             cfg=self.cfg,
@@ -101,7 +96,6 @@ def main() -> None:
     parser.add_argument("--rebuild", action="store_true", help="Clear vectorstore and manifest before ingest.")
     parser.add_argument("--force", action="store_true", help="Continue when recoverable batch failures occur.")
     args = parser.parse_args()
-
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
     step = Ingest(

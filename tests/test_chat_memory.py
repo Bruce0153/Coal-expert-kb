@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from coal_kb.chat.memory import prepare_history_context
+from coal_kb.conversation.history import prepare_history_context
 from coal_kb.conversation.models import ConversationMessage
 
 

@@ -6,9 +6,9 @@ from typing import List
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from coal_kb.metadata.normalize import Ontology, flatten_for_filtering
-from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.retrieval.retriever import ExpertRetriever
+from coal_kb.ingestion.metadata.normalize import Ontology, flatten_for_filtering
+from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.service import ExpertRetriever
 
 
 class HashEmbeddings:

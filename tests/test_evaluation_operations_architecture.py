@@ -5,11 +5,6 @@ from pathlib import Path
 import pytest
 from langchain_core.documents import Document
 
-from coal_kb.eval.datasets import EvalItem as LegacyEvalItem
-from coal_kb.eval.eval_faithfulness import (
-    simple_faithfulness_check as legacy_faithfulness_check,
-)
-from coal_kb.eval.eval_retrieval import RetrievalEvaluator as LegacyRetrievalEvaluator
 from coal_kb.evaluation import EvalItem, RetrievalEvaluator, simple_faithfulness_check
 from coal_kb.infra.observability.trace import build_retrieval_trace_summary
 from coal_kb.infra.security.uploads import build_upload_path, safe_upload_name
@@ -18,10 +13,11 @@ from coal_kb.operations import health_status
 ROOT = Path(__file__).resolve().parents[1] / "src" / "coal_kb"
 
 
-def test_legacy_evaluation_exports_are_canonical() -> None:
-    assert LegacyEvalItem is EvalItem
-    assert LegacyRetrievalEvaluator is RetrievalEvaluator
-    assert legacy_faithfulness_check is simple_faithfulness_check
+def test_evaluation_public_api_is_canonical() -> None:
+    assert EvalItem.__module__ == "coal_kb.evaluation.datasets"
+    assert RetrievalEvaluator.__module__ == "coal_kb.evaluation.retrieval"
+    assert simple_faithfulness_check.__module__ == "coal_kb.evaluation.faithfulness"
+    assert not (ROOT / "eval").exists()
 
 
 def test_evaluation_formulas_remain_unchanged() -> None:

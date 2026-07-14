@@ -26,7 +26,11 @@ def evidence_matches(expected: EvidenceReference, actual: RetrievedEvidence | Ev
     return bool(expected.document_id or expected.source_file or expected.page is not None)
 
 
-def retrieval_metrics(case: EvaluationCase, retrieved: tuple[RetrievedEvidence, ...], k_values: tuple[int, ...]) -> dict[str, float]:
+def retrieval_metrics(
+    case: EvaluationCase,
+    retrieved: tuple[RetrievedEvidence, ...],
+    k_values: tuple[int, ...],
+) -> dict[str, float]:
     """计算分层检索指标。"""
     expected = case.expected_evidence
     metrics: dict[str, float] = {}
@@ -59,7 +63,11 @@ def retrieval_metrics(case: EvaluationCase, retrieved: tuple[RetrievedEvidence, 
         if expected_sources
         else 1.0
     )
-    expected_pages = {(item.source_file or "").lower(), item.page for item in expected if item.page is not None}
+    expected_pages = {
+        ((item.source_file or "").lower(), item.page)
+        for item in expected
+        if item.page is not None
+    }
     actual_pages = {((item.source_file or "").lower(), item.page) for item in retrieved}
     metrics["page_recall"] = len(expected_pages & actual_pages) / len(expected_pages) if expected_pages else 1.0
     return metrics

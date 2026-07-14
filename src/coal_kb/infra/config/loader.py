@@ -39,8 +39,6 @@ def load_config() -> AppConfig:
     cfg = AppConfig.model_validate(raw)
 
     # Apply env overrides (keep minimal)
-    if env.embed_model:
-        cfg.embedding.model_name = env.embed_model
     if env.chroma_dir:
         cfg.paths.chroma_dir = env.chroma_dir
     if env.sqlite_path:
@@ -50,8 +48,8 @@ def load_config() -> AppConfig:
 
     if env.llm_model:
         cfg.llm.model = env.llm_model
-    if env.emb_model:
-        cfg.embeddings.model = env.emb_model
+    if env.embeddings_model:
+        cfg.embeddings.model = env.embeddings_model
 
     return _ensure_dirs(cfg)
 

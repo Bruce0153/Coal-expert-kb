@@ -114,7 +114,7 @@ class Ask:
                 persist_dir=self.cfg.paths.chroma_dir,
                 collection_name=self.cfg.chroma.collection_name,
                 embeddings_cfg=EmbeddingsConfig(**self.cfg.embeddings.model_dump()),
-                embedding_model=self.cfg.embedding.model_name,
+                embedding_model=self.cfg.embeddings.model,
             )
             chroma_factory = chroma_store.as_retriever
 

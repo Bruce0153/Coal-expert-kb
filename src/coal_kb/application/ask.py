@@ -146,7 +146,7 @@ def build_runtime(
             persist_dir=cfg.paths.chroma_dir,
             collection_name=cfg.chroma.collection_name,
             embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
-            embedding_model=cfg.embedding.model_name,
+            embedding_model=cfg.embeddings.model,
         )
         chroma_factory = store.as_retriever
     if active_backend in {"elastic", "both"}:

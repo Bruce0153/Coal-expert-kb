@@ -27,7 +27,7 @@ class ExtractRecords:
             persist_dir=self.cfg.paths.chroma_dir,
             collection_name=self.cfg.chroma.collection_name,
             embeddings_cfg=EmbeddingsConfig(**self.cfg.embeddings.model_dump()),
-            embedding_model=self.cfg.embedding.model_name,
+            embedding_model=self.cfg.embeddings.model,
         )
         retriever = store.as_retriever(k=self.limit, where=None)
         # 当前保持原检索策略，后续由数据库扫描接口替代。

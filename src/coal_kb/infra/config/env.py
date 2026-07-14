@@ -13,10 +13,9 @@ class EnvSettings(BaseSettings):
 
     config: str = "configs/app.yaml"
 
-    embed_model: Optional[str] = None
     chroma_dir: Optional[str] = None
     sqlite_path: Optional[str] = None
     log_level: Optional[str] = None
 
     llm_model: Optional[str] = None
-    emb_model: Optional[str] = None
+    embeddings_model: Optional[str] = None

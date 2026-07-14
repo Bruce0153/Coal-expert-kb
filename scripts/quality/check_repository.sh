@@ -1,24 +1,4 @@
-"""Stabilize the no-token repository quality gate before committing renames."""
-from __future__ import annotations
-
-import re
-from pathlib import Path
-
-
-def process() -> None:
-    config_path = Path("scripts/quality/config.sh")
-    config_text = config_path.read_text(encoding="utf-8")
-    config_text = re.sub(
-        r"RAG_TESTS=\(.*?\n\)",
-        'RAG_TESTS=(\n  "$REPO_ROOT/tests/test_context_builder.py"\n)',
-        config_text,
-        flags=re.S,
-    )
-    config_path.write_text(config_text, encoding="utf-8")
-
-    check_path = Path("scripts/quality/check_repository.sh")
-    check_path.write_text(
-        '''#!/usr/bin/env bash
+#!/usr/bin/env bash
 # 功能：执行不访问外部模型、API 或 Elasticsearch 的离线仓库验收。
 # 运行目录：可在仓库任意目录调用；脚本会自动定位仓库根目录。
 # 外部工具：安装 requirements/ci.txt 中的 Python、ruff、mypy 与 pytest。
@@ -47,19 +27,3 @@ timeout "$TEST_TIMEOUT_SECONDS" "$PYTEST_BIN" -q --basetemp="$REPO_ROOT/.pytest_
 rm -rf "$REPO_ROOT/.pytest_tmp"
 
 # 运行命令：bash scripts/quality/check_repository.sh
-''',
-        encoding="utf-8",
-    )
-    check_path.chmod(0o755)
-
-    workflow_path = Path(".github/workflows/quality-checks.yml")
-    workflow_text = workflow_path.read_text(encoding="utf-8")
-    workflow_text = workflow_text.replace(
-        "          python -m pip install -e . --no-deps\n",
-        "",
-    )
-    workflow_path.write_text(workflow_text, encoding="utf-8")
-
-
-if __name__ == "__main__":
-    process()

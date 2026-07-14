@@ -2,8 +2,16 @@ from langchain_core.documents import Document
 
 from coal_kb.context.service import ContextBuilder
 from coal_kb.core.models.query import (
-    AnswerSpec, ContextSpec, DiversitySpec, NeighborSpec, ObservabilitySpec,
-    QueryPlan, QueryUnderstanding, RelaxPolicy, RerankSpec, RetrievalStep,
+    AnswerSpec,
+    ContextSpec,
+    DiversitySpec,
+    NeighborSpec,
+    ObservabilitySpec,
+    QueryPlan,
+    QueryUnderstanding,
+    RelaxPolicy,
+    RerankSpec,
+    RetrievalStep,
 )
 
 

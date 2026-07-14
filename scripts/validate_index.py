@@ -6,13 +6,14 @@ import argparse
 import logging
 from dataclasses import dataclass
 
+from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
+
 from coal_kb.indexing import config
 from coal_kb.indexing.validation import validate_index
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.infra.persistence.search import ElasticStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
-from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
 
 logger = logging.getLogger(__name__)
 

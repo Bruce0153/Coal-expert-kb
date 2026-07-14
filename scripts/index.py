@@ -6,10 +6,11 @@ import argparse
 from dataclasses import dataclass
 from typing import Any
 
+from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
+
 from coal_kb.indexing.service import IndexService
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
-from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
 
 
 @dataclass

@@ -7,10 +7,11 @@ import logging
 import time
 from dataclasses import dataclass
 
+from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
+
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.ingestion.pipeline import IngestPipeline
-from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
 
 logger = logging.getLogger(__name__)
 

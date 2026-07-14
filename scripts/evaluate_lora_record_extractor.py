@@ -96,4 +96,4 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-# 运行命令：python scripts/eval_lora_extractor.py
+# 运行命令：python scripts/evaluate_lora_record_extractor.py

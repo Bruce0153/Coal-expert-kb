@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Tuple, Dict, List
-
+from typing import Any, Dict, List, Tuple
 
 _SURROGATE_MIN = 0xD800
 _SURROGATE_MAX = 0xDFFF

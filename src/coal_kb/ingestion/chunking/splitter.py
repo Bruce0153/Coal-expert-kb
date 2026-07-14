@@ -18,7 +18,7 @@ def split_page_docs(
     chunk_size: int,
     chunk_overlap: int,
 ) -> List[Document]:
-    """Legacy character splitter."""
+    """Section-aware character splitter."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

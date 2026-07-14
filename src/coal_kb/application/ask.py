@@ -13,13 +13,14 @@ from langchain_core.documents import Document
 from coal_kb.application import config
 
 if TYPE_CHECKING:
+    from coal_kb.retrieval.query.planner import QueryPlanner
+
     from coal_kb.answering import Answerer, AnswerResult
     from coal_kb.context import ContextBuilder
     from coal_kb.core.models.query import QueryPlan
     from coal_kb.infra.config import AppConfig
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.providers.llm import LLMConfig
-    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,8 @@ def build_runtime(
     enable_llm: bool = False,
     llm_provider: str = "none",
 ) -> AskRuntime:
+    from coal_kb.retrieval.query.planner import QueryPlanner
+
     from coal_kb.answering import Answerer
     from coal_kb.context import ContextBuilder
     from coal_kb.infra.persistence.registry import RegistrySQLite
@@ -123,7 +126,6 @@ def build_runtime(
     from coal_kb.infra.providers.rerank import make_reranker
     from coal_kb.ingestion.metadata.normalize import Ontology
     from coal_kb.retrieval.query import FilterParser
-    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
     onto = Ontology.load(config.ONTOLOGY_PATH)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from coal_kb.ingestion.loaders.markdown_clean import collapse_repeated_headers, fix_hyphenation
 from coal_kb.infra.config import PDFMarkdownConfig
+from coal_kb.ingestion.loaders.markdown_clean import collapse_repeated_headers, fix_hyphenation
 from coal_kb.ingestion.loaders.pdf_loader import PDFLoader
 
 

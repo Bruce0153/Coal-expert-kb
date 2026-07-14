@@ -23,7 +23,7 @@ chunking:
   heading_max_depth: 4
   embedding_backend: dashscope
 
-  # legacy fallback
+  # section-aware fallback
   chunk_size: 900
   chunk_overlap: 120
   profile_by_section:

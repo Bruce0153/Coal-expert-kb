@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, delete, desc, func, select
+from sqlalchemy import DateTime, String, Text, create_engine, delete, desc, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from .models import ConversationMessage, ConversationSummary

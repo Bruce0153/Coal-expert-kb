@@ -13,6 +13,11 @@ venv/
 
 # Data & Storage
 data/
+!data/
+data/*
+!data/eval/
+data/eval/*
+!data/eval/*_sample.jsonl
 storage/
 *.db
 *.sqlite

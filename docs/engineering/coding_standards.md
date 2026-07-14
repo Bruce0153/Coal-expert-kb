@@ -29,4 +29,12 @@
 
 - 跨文件修改同步检查调用方、测试、脚本和配置。
 - 不允许恢复已删除的兼容模块或重复实现路径。
-- 合并前执行 `bash scripts/quality/run_acceptance.sh`。
+## 文件命名
+
+- Python、Shell、配置、数据和文档文件使用小写 `snake_case`。
+- GitHub Actions 工作流使用小写 `kebab-case.yml`。
+- `README.md`、`LICENSE`、`Dockerfile`、`pyproject.toml` 等行业标准名称可以保留。
+- 文件名不得包含迁移阶段号或状态后缀。
+- 样例数据使用 `_sample` 后缀。
+
+- 合并前执行 `bash scripts/quality/check_repository.sh`。

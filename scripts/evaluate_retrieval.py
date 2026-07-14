@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
 from tqdm import tqdm
 
 from coal_kb.infra.config import AppConfig, load_config
@@ -17,7 +18,6 @@ from coal_kb.infra.persistence.vector import ChromaStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
 from coal_kb.infra.providers.rerank import make_reranker
 from coal_kb.ingestion.metadata.normalize import Ontology
-from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
 from coal_kb.retrieval.query.filter_parser import FilterParser
 from coal_kb.retrieval.service import ExpertRetriever
 from coal_kb.utils.hash import stable_chunk_id
@@ -30,7 +30,7 @@ class EvalItem:
 
 
 @dataclass
-class Eval:
+class EvaluateRetrieval:
     cfg: AppConfig
     gold_path: Path
     k: int
@@ -176,7 +176,7 @@ def main() -> None:
     parser.add_argument("--index", default=None, help="Elastic index or alias to evaluate.")
     args = parser.parse_args()
     cfg = load_config()
-    Eval(
+    EvaluateRetrieval(
         cfg=cfg,
         gold_path=Path(args.gold),
         k=int(args.k or cfg.retrieval.k),
@@ -188,4 +188,4 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-# 运行命令：python scripts/eval.py
+# 运行命令：python scripts/evaluate_retrieval.py

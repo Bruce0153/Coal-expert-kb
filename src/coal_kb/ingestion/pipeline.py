@@ -677,7 +677,7 @@ class IngestPipeline:
         stage_start = time.monotonic()
         strategy = self.cfg.chunking.strategy
         has_markdown = any(str((d.metadata or {}).get("format", "")).lower() == "markdown" for d in page_docs)
-        if strategy == "legacy":
+        if strategy == "section_aware":
             profile_by_section = {
                 key: value.model_dump() for key, value in self.cfg.chunking.profile_by_section.items()
             }

@@ -274,7 +274,7 @@ src/coal_kb/
 tests/
   test_context_builder.py
   test_ask_integration.py
-  test_ask_pipeline.py
+  test_ask_application.py
   ...
 ```
 

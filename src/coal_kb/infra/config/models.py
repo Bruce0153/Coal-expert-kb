@@ -34,7 +34,7 @@ class ChunkingConfig(BaseModel):
     heading_max_depth: int = 4
     embedding_backend: str = "local_st"  # local_st | existing_factory
 
-    # legacy fallback options
+    # section-aware fallback options
     chunk_size: int = 900
     chunk_overlap: int = 120
     profile_by_section: dict[str, ChunkingProfile] = Field(

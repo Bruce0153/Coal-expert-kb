@@ -19,6 +19,7 @@ MYPY_TARGETS=(
 )
 ARCHITECTURE_TESTS=(
   "$REPO_ROOT/tests/test_repository_conventions.py"
+  "$REPO_ROOT/tests/test_deprecated_markers.py"
   "$REPO_ROOT/tests/test_architecture_boundaries.py"
   "$REPO_ROOT/tests/test_evaluation_operations_architecture.py"
 )

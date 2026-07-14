@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coal_kb.loaders import load_any
+from coal_kb.ingestion.loaders import load_any
 
 
 def test_text_loader_txt(tmp_path: Path) -> None:

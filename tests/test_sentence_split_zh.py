@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coal_kb.chunking.sentence_split import split_sentences
+from coal_kb.ingestion.chunking.sentence_split import split_sentences
 
 
 def test_split_sentences_merges_short_zh() -> None:

@@ -6,10 +6,10 @@ import argparse
 from dataclasses import dataclass
 from typing import Any
 
-from coal_kb.cli_ui import print_banner, print_kv, print_stats_table
 from coal_kb.indexing.service import IndexService
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
+from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
 
 
 @dataclass
@@ -42,8 +42,7 @@ class Index:
             print_kv(
                 "Index Build",
                 {
-                    "embedding_version": self.args.embedding_version
-                    or self.cfg.model_versions.embedding_version,
+                    "embedding_version": self.args.embedding_version or self.cfg.model_versions.embedding_version,
                     "index_prefix": self.cfg.elastic.index_prefix,
                     "alias_current": self.cfg.elastic.alias_current,
                     "alias_prev": self.cfg.elastic.alias_prev,
@@ -60,20 +59,14 @@ class Index:
             result = service.process("switch", index_name=self.args.index)
             print_stats_table(
                 "Alias Switch",
-                [
-                    ("alias_current", str(result["alias_current"])),
-                    ("new_index", str(result["new_index"])),
-                ],
+                [("alias_current", str(result["alias_current"])), ("new_index", str(result["new_index"]))],
             )
             return result
         if self.args.cmd == "rollback":
             result = service.process("rollback")
             print_stats_table(
                 "Alias Rollback",
-                [
-                    ("alias_current", str(result["alias_current"])),
-                    ("alias_prev", str(result["alias_prev"])),
-                ],
+                [("alias_current", str(result["alias_current"])), ("alias_prev", str(result["alias_prev"]))],
             )
             return result
         raise ValueError(f"Unsupported command: {self.args.cmd}")
@@ -82,16 +75,13 @@ class Index:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Manage Elasticsearch index versions.")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
-
     build = subparsers.add_parser("build", help="Create new index and ingest with elastic backend.")
     build.add_argument("--embedding-version", default=None, help="Override embedding version.")
     build.add_argument("--resume-index", default=None, help="Continue writing into an existing physical index.")
-
     switch = subparsers.add_parser("switch", help="Switch alias_current to a specific index.")
     switch.add_argument("--index", required=True, help="Target index name.")
     subparsers.add_parser("rollback", help="Rollback alias_current to alias_prev.")
     args = parser.parse_args()
-
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
     Index(cfg=cfg, args=args).process()

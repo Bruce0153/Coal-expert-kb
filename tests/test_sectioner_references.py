@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from coal_kb.chunking.sectioner import infer_section, is_reference_like
+from coal_kb.ingestion.chunking.sectioner import infer_section, is_reference_like
 
 
 def test_references_detection():

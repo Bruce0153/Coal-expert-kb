@@ -1,28 +1,27 @@
-"""验证召回、检索、上下文和回答层的新旧入口保持兼容。"""
+"""验证召回、检索、上下文和回答层的 canonical 边界。"""
+
+from pathlib import Path
 
 import pytest
 from langchain_core.documents import Document
 
-from coal_kb.answering import Answerer as CanonicalAnswerer
+from coal_kb.answering import Answerer
 from coal_kb.answering.citations import build_rendered_citations, extract_referenced_labels
 from coal_kb.answering.confidence import assess_evidence
-from coal_kb.context import ContextBuilder as CanonicalContextBuilder
-from coal_kb.context.builder import ContextBuilder as LegacyContextBuilder
-from coal_kb.generation.answerer import Answerer as LegacyAnswerer
+from coal_kb.context import ContextBuilder
 from coal_kb.recall import bm25_rank, rrf_fuse
 from coal_kb.reranking import RerankingService
-from coal_kb.retrieval.bm25 import bm25_rank as legacy_bm25_rank
-from coal_kb.retrieval.bm25 import rrf_fuse as legacy_rrf_fuse
-from coal_kb.retrieval.retriever import ExpertRetriever as LegacyExpertRetriever
-from coal_kb.retrieval.service import ExpertRetriever as CanonicalExpertRetriever
+from coal_kb.retrieval.service import ExpertRetriever
+
+ROOT = Path(__file__).resolve().parents[1] / "src" / "coal_kb"
 
 
-def test_legacy_exports_point_to_canonical_layers() -> None:
-    assert LegacyContextBuilder is CanonicalContextBuilder
-    assert LegacyAnswerer is CanonicalAnswerer
-    assert legacy_bm25_rank is bm25_rank
-    assert legacy_rrf_fuse is rrf_fuse
-    assert issubclass(LegacyExpertRetriever, CanonicalExpertRetriever)
+def test_canonical_packages_export_primary_services() -> None:
+    assert Answerer.__module__.startswith("coal_kb.answering")
+    assert ContextBuilder.__module__ == "coal_kb.context.service"
+    assert ExpertRetriever.__module__ == "coal_kb.retrieval.service"
+    assert callable(bm25_rank)
+    assert callable(rrf_fuse)
 
 
 def test_reranking_service_preserves_remaining_order() -> None:
@@ -53,3 +52,8 @@ def test_answering_helpers_keep_existing_rules() -> None:
         labels,
     )
     assert rendered == ["[E2] b.pdf", "[E1] a.pdf (page 2)"]
+
+
+def test_layer_does_not_recreate_removed_modules() -> None:
+    removed = ["generation", "query", "qa", "eval"]
+    assert all(not (ROOT / name).exists() for name in removed)

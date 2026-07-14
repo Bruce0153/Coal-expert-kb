@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from coal_kb.infra.config import AppConfig
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.providers.llm import LLMConfig
-    from coal_kb.query.planner import QueryPlanner
+    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ class _CombinedRetriever:
         fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
         return fused[: self._k]
 
+
 def _combine_factories(chroma_factory: Any, elastic_factory: Any, *, rrf_k: int = config.DEFAULT_RRF_K):
     def factory(k: int, where: Optional[Dict[str, Any]] = None):
         chroma = chroma_factory(k=k, where=where) if chroma_factory else None
@@ -98,6 +99,7 @@ def _combine_factories(chroma_factory: Any, elastic_factory: Any, *, rrf_k: int 
         return _CombinedRetriever(chroma=chroma, elastic=elastic, k=k, rrf_k=rrf_k)
 
     return factory
+
 
 def build_runtime(
     cfg: AppConfig,
@@ -120,28 +122,23 @@ def build_runtime(
     from coal_kb.infra.providers.llm import LLMConfig
     from coal_kb.infra.providers.rerank import make_reranker
     from coal_kb.ingestion.metadata.normalize import Ontology
-    from coal_kb.query.planner import QueryPlanner
     from coal_kb.retrieval.query import FilterParser
+    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
     onto = Ontology.load(config.ONTOLOGY_PATH)
     planner = QueryPlanner(filter_parser=FilterParser(onto=onto))
-
     active_backend = backend or cfg.backend
     active_k = int(k or cfg.retrieval.k)
     active_mode = mode or cfg.retrieval.mode
     active_rerank = cfg.retrieval.rerank_enabled if rerank_enabled is None else rerank_enabled
     active_rerank_top_n = int(rerank_top_n or cfg.retrieval.rerank_top_n)
-
     if rerank_model:
         cfg.retrieval.rerank_model = rerank_model
-
     registry = RegistrySQLite(cfg.registry.sqlite_path)
-
     chroma_factory = None
     elastic_factory = None
     elastic_store = None
-
     if active_backend in {"chroma", "both"}:
         store = ChromaStore(
             persist_dir=cfg.paths.chroma_dir,
@@ -150,7 +147,6 @@ def build_runtime(
             embedding_model=cfg.embedding.model_name,
         )
         chroma_factory = store.as_retriever
-
     if active_backend in {"elastic", "both"}:
         elastic_store = ElasticStore(
             host=cfg.elastic.host,
@@ -165,14 +161,12 @@ def build_runtime(
             use_icu=cfg.elastic.enable_icu_analyzer,
             tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
         )
-
     if active_backend == "both":
         vector_factory = _combine_factories(chroma_factory, elastic_factory, rrf_k=cfg.retrieval.rrf_k)
     elif active_backend == "elastic":
         vector_factory = elastic_factory
     else:
         vector_factory = chroma_factory
-
     reranker = make_reranker(cfg) if active_rerank else None
     retriever = ExpertRetriever(
         vector_retriever_factory=vector_factory,
@@ -201,14 +195,12 @@ def build_runtime(
         elastic_use_icu=cfg.elastic.enable_icu_analyzer,
         tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
     )
-
     final_provider = llm_provider
     if enable_llm and final_provider == "none":
         final_provider = cfg.llm.provider
     llm_config = None
     if enable_llm and final_provider != "none":
         llm_config = LLMConfig(**{**cfg.llm.model_dump(), "provider": final_provider})
-
     return AskRuntime(
         cfg=cfg,
         backend=active_backend,
@@ -221,6 +213,7 @@ def build_runtime(
         registry=registry,
         llm_config=llm_config,
     )
+
 
 def execute_query(
     runtime: AskRuntime,
@@ -236,28 +229,19 @@ def execute_query(
     retrieval_query = normalize_query(raw_query)
     if not retrieval_query:
         raise ValueError("query is empty")
-
     trace: Dict[str, Any] = {}
-
     started = time.monotonic()
     plan = runtime.planner.build_plan(retrieval_query, runtime.cfg, enable_llm=False, llm_config=None)
     plan_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
     docs = runtime.retriever.execute(plan, trace=trace)
     retrieve_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
     context_package = runtime.context_builder.build(plan, docs)
     context_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
-    result = runtime.answerer.answer(
-        plan,
-        context_package
-    )
+    result = runtime.answerer.answer(plan, context_package)
     answer_ms = (time.monotonic() - started) * 1000
-
     return AskExecution(
         query=query,
         retrieval_query=retrieval_query,
@@ -278,9 +262,7 @@ def execute_query(
     )
 
 
-def retrieval_diagnostics(
-    execution: AskExecution, *, limit: int = config.DEFAULT_DIAGNOSTIC_LIMIT
-) -> List[Dict[str, Any]]:
+def retrieval_diagnostics(execution: AskExecution, *, limit: int = config.DEFAULT_DIAGNOSTIC_LIMIT) -> List[Dict[str, Any]]:
     score_map = {
         item.get("chunk_id"): item.get("score")
         for item in execution.trace.get("condition_score_top3", [])

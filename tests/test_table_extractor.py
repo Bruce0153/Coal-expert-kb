@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
-from coal_kb.parsing.table_extractor import TableExtractor
+from coal_kb.ingestion.parsing.table_extractor import TableExtractor
 
 
 class FakeTable:

@@ -10,16 +10,16 @@ from typing import Any
 
 from tqdm import tqdm
 
-from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.persistence.search import ElasticStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
 from coal_kb.infra.providers.rerank import make_reranker
 from coal_kb.ingestion.chunking.sectioner import is_reference_like
 from coal_kb.ingestion.metadata.normalize import Ontology
-from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.retrieval.query_rewrite import rewrite_query
-from coal_kb.retrieval.retriever import ExpertRetriever
+from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
+from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.query.rewrite import rewrite_query
+from coal_kb.retrieval.service import ExpertRetriever
 
 
 @dataclass
@@ -94,15 +94,12 @@ class EvalRetrieval:
         stage = parsed.get("stage")
         if stage and stage != "unknown":
             checks["stage"] = str(metadata.get("stage")) == stage
-
         gas_agents = parsed.get("gas_agent") or []
         if gas_agents:
             checks["gas_agent"] = any(metadata.get(f"gas_{agent}") for agent in gas_agents)
-
         targets = parsed.get("targets") or []
         if targets:
             checks["targets"] = any(metadata.get(f"has_{target}") for target in targets)
-
         temperature_range = parsed.get("T_range_K")
         if temperature_range:
             checks["T_range_K"] = cls._range_overlap(
@@ -112,7 +109,6 @@ class EvalRetrieval:
                 key_min="T_min_K",
                 key_max="T_max_K",
             )
-
         pressure_range = parsed.get("P_range_MPa")
         if pressure_range:
             checks["P_range_MPa"] = cls._range_overlap(
@@ -214,14 +210,12 @@ class EvalRetrieval:
         parser = FilterParser(onto=Ontology.load("configs/schema.yaml"))
         retriever = self._build_retriever()
         items = self._load_eval_set(self.gold_path, desc=self.__class__.__name__)
-
         recalls = {1: 0, 3: 0, 5: 0}
         precisions = {1: 0.0, 3: 0.0, 5: 0.0}
         diversities = {1: 0, 3: 0, 5: 0}
         reference_hits = {1: 0, 3: 0, 5: 0}
         parent_recall = 0
         child_recall = 0
-
         for item in tqdm(items, total=len(items), desc=self.__class__.__name__):
             parsed = parser.parse(item.query)
             query_text = item.query if self.disable_rewrite else rewrite_query(item.query).query
@@ -230,7 +224,6 @@ class EvalRetrieval:
             if set(trace.get("stage1_parent_ids", [])):
                 parent_recall += 1
             metadata_rows = [document.metadata or {} for document in documents]
-
             for current_k in (1, 3, 5):
                 if self._recall_at_k(metadata_rows, item.expected_sources, current_k):
                     recalls[current_k] += 1
@@ -254,7 +247,6 @@ class EvalRetrieval:
                     for index, metadata in enumerate(metadata_rows[:current_k])
                 ):
                     reference_hits[current_k] += 1
-
         total = max(len(items), 1)
         rows = [
             ["Recall@1", f"{recalls[1]}/{total}", f"{recalls[1] / total:.2f}"],
@@ -283,7 +275,6 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--no-rewrite", action="store_true")
     args = parser.parse_args()
-
     EvalRetrieval(
         cfg=load_config(),
         gold_path=Path(args.gold),

@@ -1,8 +1,8 @@
 from langchain_core.documents import Document
 
-from coal_kb.context.builder import ContextBuilder
-from coal_kb.generation.answerer import Answerer
-from coal_kb.query.plan import (
+from coal_kb.answering import Answerer
+from coal_kb.context.service import ContextBuilder
+from coal_kb.core.models.query import (
     AnswerSpec,
     ContextSpec,
     DiversitySpec,

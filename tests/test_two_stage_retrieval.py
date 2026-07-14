@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from coal_kb.embeddings.factory import EmbeddingsConfig
-from coal_kb.retrieval.retriever import ExpertRetriever
-
-from coal_kb.query.plan import (
+from coal_kb.core.models.query import (
     AnswerSpec,
     Constraint,
     ContextSpec,
@@ -19,6 +16,8 @@ from coal_kb.query.plan import (
     RerankSpec,
     RetrievalStep,
 )
+from coal_kb.infra.providers.embeddings import EmbeddingsConfig
+from coal_kb.retrieval.service import ExpertRetriever
 
 
 def _plan() -> QueryPlan:
@@ -62,7 +61,7 @@ class FakeStore:
 
 
 def test_two_stage_filters_applied(monkeypatch):
-    monkeypatch.setattr("coal_kb.retrieval.retriever.make_embeddings", lambda cfg: FakeEmb())
+    monkeypatch.setattr("coal_kb.retrieval.service.make_embeddings", lambda cfg: FakeEmb())
     store = FakeStore()
     r = ExpertRetriever(
         vector_retriever_factory=lambda k, where=None: None,
@@ -80,7 +79,7 @@ def test_two_stage_filters_applied(monkeypatch):
 
 
 def test_two_stage_fallback_when_no_parents(monkeypatch):
-    monkeypatch.setattr("coal_kb.retrieval.retriever.make_embeddings", lambda cfg: FakeEmb())
+    monkeypatch.setattr("coal_kb.retrieval.service.make_embeddings", lambda cfg: FakeEmb())
 
     class EmptyParentStore(FakeStore):
         def search_parents(self, **kwargs):
@@ -108,7 +107,7 @@ def test_two_stage_fallback_when_no_parents(monkeypatch):
 
 
 def test_execute_uses_plan_parent_ids(monkeypatch):
-    monkeypatch.setattr("coal_kb.retrieval.retriever.make_embeddings", lambda cfg: FakeEmb())
+    monkeypatch.setattr("coal_kb.retrieval.service.make_embeddings", lambda cfg: FakeEmb())
     store = FakeStore()
     r = ExpertRetriever(
         vector_retriever_factory=lambda k, where=None: None,
@@ -125,7 +124,7 @@ def test_execute_uses_plan_parent_ids(monkeypatch):
 
 
 def test_execute_fallback_when_stage1_empty(monkeypatch):
-    monkeypatch.setattr("coal_kb.retrieval.retriever.make_embeddings", lambda cfg: FakeEmb())
+    monkeypatch.setattr("coal_kb.retrieval.service.make_embeddings", lambda cfg: FakeEmb())
 
     class EmptyParentStore(FakeStore):
         def search_parents(self, **kwargs):

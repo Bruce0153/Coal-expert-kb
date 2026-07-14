@@ -1,7 +1,7 @@
-from coal_kb.metadata.normalize import Ontology
-from coal_kb.query.planner import QueryPlanner
-from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.settings import load_config
+from coal_kb.infra.config import load_config
+from coal_kb.ingestion.metadata.normalize import Ontology
+from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.query.planner import QueryPlanner
 
 
 def test_planner_builds_two_stage_plan():

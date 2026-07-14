@@ -1,4 +1,10 @@
-from coal_kb.schema.units import atm_to_mpa, bar_to_mpa, c_to_k, mol_percent_to_ppmv, ppmv_to_mol_percent
+from coal_kb.schema.units import (
+    atm_to_mpa,
+    bar_to_mpa,
+    c_to_k,
+    mol_percent_to_ppmv,
+    ppmv_to_mol_percent,
+)
 
 
 def test_temp():

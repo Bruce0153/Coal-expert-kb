@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from coal_kb.metadata.normalize import Ontology
-from coal_kb.retrieval.filter_parser import FilterParser
-from coal_kb.retrieval.retriever import ExpertRetriever
+from coal_kb.ingestion.metadata.normalize import Ontology
+from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.service import ExpertRetriever
 
 
 class DummyRetriever:

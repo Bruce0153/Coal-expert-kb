@@ -6,13 +6,13 @@ import argparse
 import logging
 from dataclasses import dataclass
 
-from coal_kb.cli_ui import print_banner, print_stats_table
 from coal_kb.indexing import config
 from coal_kb.indexing.validation import validate_index
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.infra.persistence.search import ElasticStore
 from coal_kb.infra.providers.embeddings import EmbeddingsConfig
+from coal_kb.interfaces.cli.ui import print_banner, print_stats_table
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,6 @@ def main() -> None:
     parser.add_argument("--index", required=True, help="Index name or alias to validate.")
     parser.add_argument("--query", default=config.VALIDATION_QUERY, help="Query text for self-check.")
     args = parser.parse_args()
-
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
     result = ValidateIndex(cfg=cfg, index_name=args.index, query=args.query).process()

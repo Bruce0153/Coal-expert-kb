@@ -1,29 +1,29 @@
 # Retrieval 与回答链分层
 
-本阶段只调整模块归属和依赖方向，不改变召回、约束放宽、软排序、重排、上下文预算、引用编号、Prompt 和置信度规则。
+召回、检索编排、上下文和回答已经统一到单一实现路径。
 
 ```text
-retrieval query / constraints
-            ↓
+retrieval/query + retrieval/constraints
+                    ↓
 recall (dense / sparse / fusion / parent-child)
-            ↓
-retrieval service (soft rank / diversity / trace)
-            ↓
-reranking service
-            ↓
+                    ↓
+retrieval/service (soft rank / diversity / trace)
+                    ↓
+reranking/service
+                    ↓
 context (dedup / budget / citations / source cards)
-            ↓
-answering (confidence / prompt / claims / rendered citations)
+                    ↓
+answering (confidence / prompt / claims / citations)
 ```
 
-旧入口继续保留为兼容 facade：
+canonical 入口：
 
-- `coal_kb.retrieval.retriever`
-- `coal_kb.retrieval.bm25`
-- `coal_kb.retrieval.constraint_policy`
-- `coal_kb.retrieval.filter_parser`
-- `coal_kb.context.builder`
-- `coal_kb.context.types`
-- `coal_kb.generation.answerer`
+- 查询理解：`coal_kb.retrieval.query`
+- 约束策略：`coal_kb.retrieval.constraints`
+- 召回：`coal_kb.recall`
+- 检索编排：`coal_kb.retrieval.service`
+- 重排序：`coal_kb.reranking`
+- 上下文：`coal_kb.context`
+- 回答：`coal_kb.answering`
 
-新的业务代码应使用 canonical 路径，不再依赖上述旧入口。
+任何新增代码不得重新创建同职责的平行模块。

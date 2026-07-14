@@ -1,6 +1,9 @@
-from coal_kb.api.models import ChatRequest
-from coal_kb.api.runtime_overrides import apply_runtime_overrides, build_settings_defaults
-from coal_kb.settings import AppConfig
+from coal_kb.infra.config import AppConfig
+from coal_kb.interfaces.api.models import ChatRequest
+from coal_kb.interfaces.api.runtime_overrides import (
+    apply_runtime_overrides,
+    build_settings_defaults,
+)
 
 
 def test_apply_runtime_overrides_updates_models_and_provider_settings():
@@ -27,9 +30,7 @@ def test_apply_runtime_overrides_updates_models_and_provider_settings():
 
 def test_build_settings_defaults_exposes_frontend_defaults():
     cfg = AppConfig()
-
     payload = build_settings_defaults(cfg)
-
     assert payload.backend == cfg.backend
     assert payload.mode == cfg.retrieval.mode
     assert "elastic" in payload.backend_options

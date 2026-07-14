@@ -1,17 +1,9 @@
 from langchain_core.documents import Document
 
-from coal_kb.context.builder import ContextBuilder
-from coal_kb.query.plan import (
-    AnswerSpec,
-    ContextSpec,
-    DiversitySpec,
-    NeighborSpec,
-    ObservabilitySpec,
-    QueryPlan,
-    QueryUnderstanding,
-    RelaxPolicy,
-    RerankSpec,
-    RetrievalStep,
+from coal_kb.context.service import ContextBuilder
+from coal_kb.core.models.query import (
+    AnswerSpec, ContextSpec, DiversitySpec, NeighborSpec, ObservabilitySpec,
+    QueryPlan, QueryUnderstanding, RelaxPolicy, RerankSpec, RetrievalStep,
 )
 
 
@@ -19,13 +11,10 @@ def _plan():
     return QueryPlan(
         query=QueryUnderstanding(raw="q", normalized="q"),
         retrieval_steps=[RetrievalStep(name="s", level="child", k_candidates=5, k_final=3)],
-        relax_policy=RelaxPolicy(),
-        rerank=RerankSpec(),
-        neighbor=NeighborSpec(),
+        relax_policy=RelaxPolicy(), rerank=RerankSpec(), neighbor=NeighborSpec(),
         diversity=DiversitySpec(max_per_source=2),
         context=ContextSpec(max_context_tokens=100, max_evidence_chunks=2, deduplicate=True),
-        answer=AnswerSpec(),
-        observability=ObservabilitySpec(trace_id="t"),
+        answer=AnswerSpec(), observability=ObservabilitySpec(trace_id="t"),
     )
 
 

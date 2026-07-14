@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from coal_kb.metadata.normalize import Ontology
-from coal_kb.retrieval.constraint_policy import build_plan
-from coal_kb.retrieval.filter_parser import FilterParser
+from coal_kb.ingestion.metadata.normalize import Ontology
+from coal_kb.retrieval.constraints.policy import build_plan
+from coal_kb.retrieval.query.filter_parser import FilterParser
 
 
 def test_constraint_policy_relax_steps() -> None:

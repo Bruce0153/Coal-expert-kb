@@ -38,13 +38,13 @@ jobs:
         continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          python -m compileall "${SOURCE_PATHS[@]}" > milestone-c-compile.txt 2>&1
+          python -m compileall "${SOURCE_PATHS[@]}" > milestone_c_compile.txt 2>&1
       - name: Upload compile report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: milestone-c-compile
-          path: milestone-c-compile.txt
+          path: milestone_c_compile.txt
       - name: Stop on compile failure
         if: steps.compile.outcome == 'failure'
         run: exit 1
@@ -58,13 +58,13 @@ jobs:
         continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}" > milestone-c-mypy.txt 2>&1
+          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}" > milestone_c_mypy.txt 2>&1
       - name: Upload mypy report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: milestone-c-mypy
-          path: milestone-c-mypy.txt
+          path: milestone_c_mypy.txt
       - name: Stop on mypy failure
         if: steps.mypy.outcome == 'failure'
         run: exit 1
@@ -73,13 +73,13 @@ jobs:
         continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          pytest -q "${ARCHITECTURE_TESTS[@]}" > milestone-c-architecture.txt 2>&1
+          pytest -q "${ARCHITECTURE_TESTS[@]}" > milestone_c_architecture.txt 2>&1
       - name: Upload architecture report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: milestone-c-architecture
-          path: milestone-c-architecture.txt
+          path: milestone_c_architecture.txt
       - name: Stop on architecture failure
         if: steps.architecture.outcome == 'failure'
         run: exit 1

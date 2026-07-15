@@ -6,7 +6,12 @@ import json
 
 from langchain_core.documents import Document
 
-from coal_kb.evaluation import AnswerObservation, ClaimObservation, EvaluationPipeline, EvidenceReference
+from coal_kb.evaluation import (
+    AnswerObservation,
+    ClaimObservation,
+    EvaluationPipeline,
+    EvidenceReference,
+)
 from coal_kb.evaluation.datasets import load_evaluation_cases
 
 

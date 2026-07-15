@@ -10,6 +10,7 @@ TEST_TIMEOUT_SECONDS=${TEST_TIMEOUT_SECONDS:-180}
 SOURCE_PATHS=("$REPO_ROOT/src/coal_kb" "$REPO_ROOT/scripts" "$REPO_ROOT/tests")
 MYPY_TARGETS=(
   "$REPO_ROOT/src/coal_kb/core"
+  "$REPO_ROOT/src/coal_kb/complex_qa"
   "$REPO_ROOT/src/coal_kb/infra/config"
   "$REPO_ROOT/src/coal_kb/retrieval"
   "$REPO_ROOT/src/coal_kb/context"
@@ -33,6 +34,12 @@ FOUNDATION_TESTS=(
   "$REPO_ROOT/tests/test_config_consistency.py"
   "$REPO_ROOT/tests/test_evaluation_pipeline.py"
   "$REPO_ROOT/tests/test_provider_runtime.py"
+  "$REPO_ROOT/tests/test_complex_question_router.py"
+  "$REPO_ROOT/tests/test_complex_query_planner.py"
+  "$REPO_ROOT/tests/test_complex_question_service.py"
+  "$REPO_ROOT/tests/test_complex_aggregation.py"
+  "$REPO_ROOT/tests/test_complex_tables.py"
+  "$REPO_ROOT/tests/test_complex_evaluation.py"
 )
 RAG_TESTS=(
   "$REPO_ROOT/tests/test_context_builder.py"

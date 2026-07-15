@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from coal_kb.interfaces.cli.ui import print_banner, print_kv, print_stats_table
-from coal_kb.retrieval.query.planner import QueryPlanner
 
 from coal_kb.answering import Answerer
 from coal_kb.context import ContextBuilder
@@ -24,6 +23,7 @@ from coal_kb.infra.providers.rerank import make_reranker
 from coal_kb.ingestion.metadata.normalize import Ontology
 from coal_kb.recall import rrf_fuse
 from coal_kb.retrieval.query.filter_parser import FilterParser
+from coal_kb.retrieval.query.planner import QueryPlanner
 from coal_kb.retrieval.service import ExpertRetriever
 
 logger = logging.getLogger(__name__)

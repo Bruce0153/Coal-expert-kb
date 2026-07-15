@@ -13,14 +13,14 @@ from langchain_core.documents import Document
 from coal_kb.application import config
 
 if TYPE_CHECKING:
-    from coal_kb.retrieval.query.planner import QueryPlanner
-
     from coal_kb.answering import Answerer, AnswerResult
+    from coal_kb.complex_qa import ComplexQuestionService
     from coal_kb.context import ContextBuilder
     from coal_kb.core.models.query import QueryPlan
     from coal_kb.infra.config import AppConfig
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.providers.llm import LLMConfig
+    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class AskRuntime:
     planner: QueryPlanner
     retriever: ExpertRetriever
     context_builder: ContextBuilder
+    complex_question_service: ComplexQuestionService
     answerer: Answerer
     registry: RegistrySQLite
     llm_config: Optional[LLMConfig]
@@ -114,9 +115,8 @@ def build_runtime(
     enable_llm: bool = False,
     llm_provider: str = "none",
 ) -> AskRuntime:
-    from coal_kb.retrieval.query.planner import QueryPlanner
-
     from coal_kb.answering import Answerer
+    from coal_kb.complex_qa import ComplexQuestionService
     from coal_kb.context import ContextBuilder
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.persistence.search import ElasticStore
@@ -125,6 +125,7 @@ def build_runtime(
     from coal_kb.infra.providers.tokenizers import make_tokenizer
     from coal_kb.ingestion.metadata.normalize import Ontology
     from coal_kb.retrieval.query import FilterParser
+    from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
     onto = Ontology.load(config.ONTOLOGY_PATH)
@@ -211,6 +212,18 @@ def build_runtime(
         planner=planner,
         retriever=retriever,
         context_builder=ContextBuilder(token_counter=make_tokenizer(cfg.tokenizer).count_tokens),
+        complex_question_service=ComplexQuestionService(
+            retriever=retriever,
+            sqlite_path=cfg.paths.sqlite_path,
+            table_records_path=cfg.complex_qa.table_records_path,
+            comparison_k_per_side=cfg.complex_qa.comparison_k_per_side,
+            max_multi_hop_steps=cfg.complex_qa.max_multi_hop_steps,
+            aggregation_record_limit=cfg.complex_qa.aggregation_record_limit,
+            aggregation_evidence_limit=cfg.complex_qa.aggregation_evidence_limit,
+            table_top_k=cfg.complex_qa.table_top_k,
+            cross_document_min_sources=cfg.complex_qa.cross_document_min_sources,
+            cross_document_max_per_source=cfg.complex_qa.cross_document_max_per_source,
+        ),
         answerer=Answerer(enable_llm=enable_llm and llm_config is not None, llm_config=llm_config),
         registry=registry,
         llm_config=llm_config,
@@ -236,7 +249,7 @@ def execute_query(
     plan = runtime.planner.build_plan(retrieval_query, runtime.cfg, enable_llm=False, llm_config=None)
     plan_ms = (time.monotonic() - started) * 1000
     started = time.monotonic()
-    docs = runtime.retriever.execute(plan, trace=trace)
+    docs = runtime.complex_question_service.process(plan, trace=trace)
     retrieve_ms = (time.monotonic() - started) * 1000
     started = time.monotonic()
     context_package = runtime.context_builder.build(plan, docs)

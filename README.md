@@ -107,5 +107,6 @@ bash scripts/quality/check_repository.sh
 - `docs/architecture/application_interfaces.md`
 - `docs/architecture/retrieval_answering_layers.md`
 - `docs/architecture/evaluation_operations.md`
+- `docs/architecture/complex_science_qa.md`
 - `docs/engineering/coding_standards.md`
 - `docs/engineering/acceptance_criteria.md`

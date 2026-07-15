@@ -31,6 +31,7 @@ jobs:
           python .migration/milestone_c_integration.py
           python .migration/milestone_c_tests.py
           python .migration/milestone_c_fixes.py
+          python .migration/milestone_c_behavior_fixes.py
       - name: Remove migration files
         run: rm -rf .migration
       - name: Install CI dependencies

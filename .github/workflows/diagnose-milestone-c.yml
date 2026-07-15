@@ -69,9 +69,20 @@ jobs:
         if: steps.mypy.outcome == 'failure'
         run: exit 1
       - name: Architecture tests
+        id: architecture
+        continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          pytest -q "${ARCHITECTURE_TESTS[@]}"
+          pytest -q "${ARCHITECTURE_TESTS[@]}" > milestone-c-architecture.txt 2>&1
+      - name: Upload architecture report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-c-architecture
+          path: milestone-c-architecture.txt
+      - name: Stop on architecture failure
+        if: steps.architecture.outcome == 'failure'
+        run: exit 1
       - name: Foundation tests
         run: |
           source "$SCRIPT_DIR/config.sh"

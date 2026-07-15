@@ -23,7 +23,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Apply migration
-        run: python .migration/apply_provider_runtime.py
+        run: |
+          python .migration/apply_provider_runtime.py
+          python .migration/fix_provider_exports.py
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -38,20 +40,9 @@ jobs:
           ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905 --fix || true
           ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905
       - name: Mypy
-        id: mypy
-        continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}" > mypy-report.txt 2>&1
-      - name: Upload mypy report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: provider-mypy-report
-          path: mypy-report.txt
-      - name: Stop on mypy failure
-        if: steps.mypy.outcome == 'failure'
-        run: exit 1
+          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}"
       - name: Architecture tests
         run: |
           source "$SCRIPT_DIR/config.sh"

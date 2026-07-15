@@ -40,7 +40,18 @@ jobs:
         run: |
           ruff check src/coal_kb scripts tests --select E,F,I,B --ignore E501,B905 --fix || true
       - name: Validate complex evaluation sample
-        run: python scripts/validate_complex_dataset.py --require-all-types
+        id: validate
+        continue-on-error: true
+        run: python scripts/validate_complex_dataset.py --require-all-types > milestone-c-validation.txt 2>&1
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-c-validation
+          path: milestone-c-validation.txt
+      - name: Stop on validation failure
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
       - name: Run offline repository checks
         run: bash scripts/quality/check_repository.sh
       - name: Commit Milestone C

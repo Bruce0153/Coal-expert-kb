@@ -1,47 +1,47 @@
-"""提供摄入阶段的loaders实现。"""
+"""加载 JSON 与 JSONL 文档。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from langchain_core.documents import Document
 
 from coal_kb.ingestion.loaders.base import BaseLoader, detect_language, normalize_text
 from coal_kb.ingestion.loaders.registry import register_loader
+from coal_kb.utils.jsonl import iter_jsonl
 
 
 class JSONLoader(BaseLoader):
-    def load(self, path: str) -> List[Document]:
-        text = Path(path).read_text(encoding="utf-8", errors="ignore")
-        docs: List[Document] = []
-        if path.endswith(".jsonl"):
-            for idx, line in enumerate(text.splitlines()):
-                if not line.strip():
-                    continue
-                obj = json.loads(line)
-                docs.append(self._doc_from_obj(path, obj, idx))
-            return docs
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            for idx, rec in enumerate(obj):
-                docs.append(self._doc_from_obj(path, rec, idx))
-            return docs
-        docs.append(self._doc_from_obj(path, obj, 0))
-        return docs
+    def load(self, path: str) -> list[Document]:
+        source = Path(path)
+        if source.suffix.lower() == ".jsonl":
+            return [
+                self._document(path, payload, row_number - 1)
+                for row_number, payload in iter_jsonl(source)
+            ]
 
-    def _doc_from_obj(self, path: str, obj: Any, idx: int) -> Document:
-        content = normalize_text(json.dumps(obj, ensure_ascii=False))
-        lang = detect_language(content)
+        payload = json.loads(
+            source.read_text(encoding="utf-8", errors="ignore")
+        )
+        values = payload if isinstance(payload, list) else [payload]
+        return [
+            self._document(path, value, index)
+            for index, value in enumerate(values)
+        ]
+
+    @staticmethod
+    def _document(path: str, payload: Any, index: int) -> Document:
+        content = normalize_text(json.dumps(payload, ensure_ascii=False))
         return Document(
             page_content=content,
             metadata={
                 "source_file": path,
-                "record_id": idx,
+                "record_id": index,
                 "section": "record",
                 "doc_type": "jsonl" if path.endswith(".jsonl") else "json",
-                "language": lang,
+                "language": detect_language(content),
                 "parser": "json",
             },
         )

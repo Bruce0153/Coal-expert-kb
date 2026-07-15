@@ -1,16 +1,39 @@
-"""确保迁移期文本标记不会重新进入当前仓库树。"""
+"""确保已停用的迁移标记和兼容入口不会重新进入仓库。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TEXT_SUFFIXES = {".py", ".sh", ".md", ".txt", ".jsonl", ".yaml", ".yml", ".toml"}
-IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+TEXT_SUFFIXES = {
+    ".py",
+    ".sh",
+    ".md",
+    ".txt",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+    ".toml",
+}
+IGNORED_PARTS = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+}
+FORBIDDEN_MARKERS = {
+    "leg" + "acy",
+    "compat" + "_where",
+    "where" + "_full",
+    "use" + "_fuse",
+    "coal_kb" + ".settings",
+    "eval" + "_retrieval.py",
+    "eval" + "_lora_extractor.py",
+}
 
 
-def test_deprecated_migration_marker_is_absent() -> None:
-    marker = "leg" + "acy"
+def test_retired_markers_are_absent() -> None:
     violations: list[str] = []
     for path in REPO_ROOT.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
@@ -18,6 +41,9 @@ def test_deprecated_migration_marker_is_absent() -> None:
         if IGNORED_PARTS.intersection(path.parts):
             continue
         content = path.read_text(encoding="utf-8", errors="ignore").lower()
-        if marker in content:
-            violations.append(str(path.relative_to(REPO_ROOT)))
+        for marker in FORBIDDEN_MARKERS:
+            if marker in content:
+                violations.append(
+                    f"{path.relative_to(REPO_ROOT)}: {marker}"
+                )
     assert violations == []

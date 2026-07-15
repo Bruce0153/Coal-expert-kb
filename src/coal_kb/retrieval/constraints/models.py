@@ -19,7 +19,6 @@ class Constraint:
 @dataclass
 class ConstraintSet:
     constraints: list[Constraint] = field(default_factory=list)
-    compat_where: dict[str, Any] = field(default_factory=dict)
 
     @property
     def hard_constraints(self) -> list[Constraint]:
@@ -30,7 +29,7 @@ class ConstraintSet:
         return [constraint for constraint in self.constraints if constraint.priority != "hard"]
 
     def to_where_hard(self) -> dict[str, Any]:
-        return {constraint.name: constraint.value for constraint in self.hard_constraints}
-
-    def soft_features(self) -> list[Constraint]:
-        return self.soft_constraints
+        return {
+            constraint.name: constraint.value
+            for constraint in self.hard_constraints
+        }

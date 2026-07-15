@@ -28,6 +28,7 @@ jobs:
           python .migration/milestone_c_integration.py
           python .migration/milestone_c_tests.py
           python .migration/milestone_c_fixes.py
+          python .migration/milestone_c_behavior_fixes.py
           rm -rf .migration
       - name: Install dependencies
         run: |

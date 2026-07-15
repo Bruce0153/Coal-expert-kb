@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "coal-expert-kb"
 version = "0.1.0"
-description = "Expert knowledge base for coal pyrolysis/gasification pollutants with RAG + structured extraction."
+description = "Evidence-grounded knowledge base for coal pyrolysis and gasification literature."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -20,6 +20,7 @@ dependencies = [
   "tqdm>=4.66",
   "SQLAlchemy>=2.0",
   "fastapi>=0.115",
+  "python-multipart>=0.0.9",
   "langchain>=0.3",
   "langchain-core>=0.3",
   "langchain-community>=0.3",
@@ -37,6 +38,7 @@ dependencies = [
   "scikit-learn>=1.4",
   "elasticsearch>=8.12",
   "uvicorn>=0.30",
+  "requests>=2.31",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,14 @@ ocr = [
   "pytesseract>=0.3",
   "pillow>=10.0",
 ]
+training = [
+  "accelerate>=0.28",
+  "bitsandbytes>=0.43",
+  "datasets>=2.18",
+  "peft>=0.10",
+  "transformers>=4.40",
+  "trl>=0.8",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
@@ -60,12 +70,30 @@ dev = [
 where = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py310"
+exclude = [
+  ".git",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".venv",
+  "build",
+  "dist",
+  "storage",
+]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]
+select = ["E", "F", "I", "B"]
+ignore = ["E501", "B905"]
+
+[tool.mypy]
+python_version = "3.10"
+follow_imports = "skip"
+ignore_missing_imports = true
+show_error_codes = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-q"

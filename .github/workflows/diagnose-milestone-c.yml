@@ -33,9 +33,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements/ci.txt
       - name: Compile
+        id: compile
+        continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          python -m compileall -q "${SOURCE_PATHS[@]}"
+          python -m compileall "${SOURCE_PATHS[@]}" > milestone-c-compile.txt 2>&1
+      - name: Upload compile report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-c-compile
+          path: milestone-c-compile.txt
+      - name: Stop on compile failure
+        if: steps.compile.outcome == 'failure'
+        run: exit 1
       - name: Ruff
         run: |
           source "$SCRIPT_DIR/config.sh"

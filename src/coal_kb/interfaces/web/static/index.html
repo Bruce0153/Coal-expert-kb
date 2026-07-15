@@ -179,26 +179,26 @@
               <span>API 基础地址</span>
               <input id="setting-api-base-url" type="text" placeholder="http://127.0.0.1:8000" />
             </label>
-            <label class="field">
-              <span>Provider 基础地址</span>
-              <input id="setting-provider-base-url" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
-            </label>
-            <label class="field">
-              <span>API Key</span>
-              <input id="setting-api-key" type="password" placeholder="可选，每次请求时覆盖" />
-            </label>
-            <label class="field">
-              <span>LLM 提供商</span>
-              <select id="setting-llm-provider"></select>
-            </label>
-            <label class="field">
-              <span>LLM 模型</span>
-              <input id="setting-llm-model" type="text" placeholder="qwen-plus" />
-            </label>
-            <label class="field">
-              <span>嵌入模型</span>
-              <input id="setting-embedding-model" type="text" placeholder="text-embedding-v3" />
-            </label>
+            <label class="field"><span>Tokenizer 模式</span><select id="setting-tokenizer-mode"><option value="local">本地</option><option value="remote">远程</option></select></label>
+            <label class="field"><span>Tokenizer Provider</span><input id="setting-tokenizer-provider" type="text" /></label>
+            <label class="field"><span>Tokenizer 地址</span><input id="setting-tokenizer-base-url" type="text" /></label>
+            <label class="field"><span>Tokenizer API Key</span><input id="setting-tokenizer-api-key" type="password" /></label>
+            <label class="field"><span>Tokenizer 模型</span><input id="setting-tokenizer-model" type="text" /></label>
+            <label class="field"><span>Embedding 模式</span><select id="setting-embedding-mode"><option value="remote">远程</option><option value="local">本地</option></select></label>
+            <label class="field"><span>Embedding Provider</span><input id="setting-embedding-provider" type="text" /></label>
+            <label class="field"><span>Embedding 地址</span><input id="setting-embedding-base-url" type="text" /></label>
+            <label class="field"><span>Embedding API Key</span><input id="setting-embedding-api-key" type="password" /></label>
+            <label class="field"><span>Embedding 模型</span><input id="setting-embedding-model" type="text" /></label>
+            <label class="field"><span>Rerank 模式</span><select id="setting-rerank-mode"><option value="remote">远程</option><option value="local">本地</option></select></label>
+            <label class="field"><span>Rerank Provider</span><input id="setting-rerank-provider" type="text" /></label>
+            <label class="field"><span>Rerank 地址</span><input id="setting-rerank-base-url" type="text" /></label>
+            <label class="field"><span>Rerank API Key</span><input id="setting-rerank-api-key" type="password" /></label>
+            <label class="field"><span>Rerank 模型</span><input id="setting-rerank-model" type="text" /></label>
+            <label class="field"><span>LLM 模式</span><select id="setting-llm-mode"><option value="remote">远程</option><option value="local">本地</option></select></label>
+            <label class="field"><span>LLM Provider</span><input id="setting-llm-provider" type="text" /></label>
+            <label class="field"><span>LLM 地址</span><input id="setting-llm-base-url" type="text" /></label>
+            <label class="field"><span>LLM API Key</span><input id="setting-llm-api-key" type="password" /></label>
+            <label class="field"><span>LLM 模型</span><input id="setting-llm-model" type="text" /></label>
             <label class="field">
               <span>检索后端</span>
               <select id="setting-backend"></select>

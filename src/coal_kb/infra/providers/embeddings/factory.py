@@ -1,44 +1,18 @@
+"""根据显式模式创建远程或本地 Embedding。"""
+
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
-from typing import Optional
+from coal_kb.infra.providers.config import EmbeddingsProviderConfig
+from coal_kb.infra.providers.embeddings.local.huggingface import make_local_embeddings
+from coal_kb.infra.providers.embeddings.remote.openai_compatible import make_remote_embeddings
 
-from langchain_openai import OpenAIEmbeddings
-
-
-@dataclass(frozen=True)
-class EmbeddingsConfig:
-    provider: str
-    base_url: str
-    api_key_env: str
-    model: str
-    api_key: Optional[str] = None
-    dimensions: Optional[int] = None
+EmbeddingsConfig = EmbeddingsProviderConfig
 
 
-def make_embeddings(cfg: EmbeddingsConfig) -> OpenAIEmbeddings:
-    if cfg.provider not in ("dashscope", "openai_compatible", "openai"):
-        raise ValueError(f"Unsupported embeddings.provider: {cfg.provider}")
-
-    api_key = cfg.api_key or os.getenv(cfg.api_key_env)
-    if not api_key:
-        raise RuntimeError(f"Missing env var: {cfg.api_key_env}")
-
-    kwargs = {}
-
-    # DashScope embedding supports configurable dimensions for text-embedding-v4/v3
-    if cfg.dimensions is not None:
-        kwargs["dimensions"] = int(cfg.dimensions)
-
-    if cfg.provider == "dashscope":
-        kwargs["check_embedding_ctx_length"] = False
-        kwargs["chunk_size"] = 10
-
-    return OpenAIEmbeddings(
-        model=cfg.model,
-        api_key=api_key,
-        base_url=cfg.base_url,
-        **kwargs,
-    )
-
+def make_embeddings(config: EmbeddingsProviderConfig):
+    """按配置模式创建 Embedding，禁止隐式跨模式回退。"""
+    if config.mode == "remote":
+        return make_remote_embeddings(config.remote)
+    if config.mode == "local":
+        return make_local_embeddings(config.local)
+    raise ValueError(f"Unsupported embedding mode: {config.mode}")

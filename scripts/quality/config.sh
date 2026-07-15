@@ -32,6 +32,7 @@ FOUNDATION_TESTS=(
   "$REPO_ROOT/tests/test_registry.py"
   "$REPO_ROOT/tests/test_config_consistency.py"
   "$REPO_ROOT/tests/test_evaluation_pipeline.py"
+  "$REPO_ROOT/tests/test_provider_runtime.py"
 )
 RAG_TESTS=(
   "$REPO_ROOT/tests/test_context_builder.py"

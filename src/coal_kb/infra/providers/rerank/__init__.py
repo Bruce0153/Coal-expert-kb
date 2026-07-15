@@ -1,7 +1,6 @@
-from .factory import (
-    CrossEncoderReranker,
-    DashScopeReranker,
-    make_reranker,
-)
+"""导出 Rerank Provider 正式入口。"""
 
-__all__ = ["CrossEncoderReranker", "DashScopeReranker", "make_reranker"]
+from coal_kb.infra.providers.config import RerankProviderConfig as RerankConfig
+from coal_kb.infra.providers.rerank.factory import make_reranker
+
+__all__ = ["RerankConfig", "make_reranker"]

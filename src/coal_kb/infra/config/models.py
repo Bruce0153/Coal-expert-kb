@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
+
+from coal_kb.infra.providers.config import (
+    EmbeddingsProviderConfig,
+    LLMProviderConfig,
+    RerankProviderConfig,
+    TokenizerProviderConfig,
+    default_embeddings_config,
+    default_llm_config,
+    default_rerank_config,
+    default_tokenizer_config,
+)
 
 
 class PathsConfig(BaseModel):
@@ -95,14 +104,6 @@ class RetrievalConfig(BaseModel):
     two_stage: TwoStageRetrievalConfig = Field(default_factory=TwoStageRetrievalConfig)
 
 
-class RerankConfig(BaseModel):
-    # Default: DashScope(OpenAI-compatible) qwen3-rerank
-    provider: str = "dashscope"
-    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    api_key_env: str = "DASHSCOPE_API_KEY"
-    model: str = "qwen3-rerank"
-    timeout: int = 60
-
 
 class LoggingConfig(BaseModel):
     level: str = "INFO"
@@ -160,29 +161,15 @@ class QueryRewriteConfig(BaseModel):
     enable_llm: bool = False
 
 
-class LLMConfig(BaseModel):
-    provider: str = "dashscope"
-    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    api_key_env: str = "DASHSCOPE_API_KEY"
-    api_key: Optional[str] = None
-    model: str = "qwen-plus"
-    temperature: float = 0.0
-    timeout: int = 60
-
-
-class RemoteEmbeddingsConfig(BaseModel):
-    provider: str = "dashscope"
-    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    api_key_env: str = "DASHSCOPE_API_KEY"
-    api_key: Optional[str] = None
-    model: str = "text-embedding-v3"
-    dimensions: Optional[int] = 1024
 
 
 class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
 
-    rerank: RerankConfig = Field(default_factory=RerankConfig)
+    tokenizer: TokenizerProviderConfig = Field(default_factory=default_tokenizer_config)
+    embeddings: EmbeddingsProviderConfig = Field(default_factory=default_embeddings_config)
+    rerank: RerankProviderConfig = Field(default_factory=default_rerank_config)
+    llm: LLMProviderConfig = Field(default_factory=default_llm_config)
 
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     pdf_markdown: PDFMarkdownConfig = Field(default_factory=PDFMarkdownConfig)
@@ -198,5 +185,3 @@ class AppConfig(BaseModel):
     query_rewrite: QueryRewriteConfig = Field(default_factory=QueryRewriteConfig)
     tenancy: TenancyConfig = Field(default_factory=TenancyConfig)
 
-    llm: LLMConfig = Field(default_factory=LLMConfig)
-    embeddings: RemoteEmbeddingsConfig = Field(default_factory=RemoteEmbeddingsConfig)

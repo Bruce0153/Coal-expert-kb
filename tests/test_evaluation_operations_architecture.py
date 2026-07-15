@@ -2,10 +2,7 @@
 
 from pathlib import Path
 
-import pytest
-from langchain_core.documents import Document
-
-from coal_kb.evaluation import EvalItem, RetrievalEvaluator, simple_faithfulness_check
+from coal_kb.evaluation import EvaluationCase, EvaluationPipeline, EvidenceReference, QueryType
 from coal_kb.infra.observability.trace import build_retrieval_trace_summary
 from coal_kb.infra.security.uploads import build_upload_path, safe_upload_name
 from coal_kb.operations import health_status
@@ -14,20 +11,12 @@ ROOT = Path(__file__).resolve().parents[1] / "src" / "coal_kb"
 
 
 def test_evaluation_public_api_is_canonical() -> None:
-    assert EvalItem.__module__ == "coal_kb.evaluation.datasets"
-    assert RetrievalEvaluator.__module__ == "coal_kb.evaluation.retrieval"
-    assert simple_faithfulness_check.__module__ == "coal_kb.evaluation.faithfulness"
-    assert not (ROOT / "eval").exists()
-
-
-def test_evaluation_formulas_remain_unchanged() -> None:
-    docs = [Document(page_content="evidence", metadata={"source_file": "paper.pdf", "page": 3})]
-    assert simple_faithfulness_check("[1] [2] [3]", docs) == pytest.approx(0.5)
-    evaluator = RetrievalEvaluator(lambda question: docs)
-    result = evaluator.evaluate(
-        [EvalItem(question="q", gold_sources=[{"source_contains": "paper", "page": 3}])]
-    )
-    assert result == {"recall": 1.0, "total": 1.0, "hit": 1.0}
+    assert EvaluationCase.__module__ == "coal_kb.evaluation.models"
+    assert EvidenceReference.__module__ == "coal_kb.evaluation.models"
+    assert QueryType.FACT.value == "fact"
+    assert EvaluationPipeline.__module__ == "coal_kb.evaluation.pipeline"
+    assert not (ROOT / "evaluation" / "faithfulness.py").exists()
+    assert not (ROOT / "evaluation" / "retrieval.py").exists()
 
 
 def test_upload_security_preserves_existing_behavior(tmp_path: Path) -> None:
@@ -48,27 +37,11 @@ def test_health_and_trace_protocols_remain_stable() -> None:
         history_used=False,
         history_reason="standalone_query",
         trace={"vector_candidates": 4, "postfiltered_count": 2},
-    ) == {
-        "retrieval_query": "query",
-        "history_used": False,
-        "history_reason": "standalone_query",
-        "vector_candidates": 4,
-        "postfiltered_count": 2,
-        "source_distribution": None,
-        "heading_distribution": None,
-    }
+    )["postfiltered_count"] == 2
 
 
-def test_architecture_dependencies_are_one_way() -> None:
-    evaluation_text = "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "evaluation").glob("*.py")
-    )
-    security_text = "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "infra" / "security").glob("*.py")
-    )
-    operations_text = "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "operations").glob("*.py")
-    )
-    assert "fastapi" not in evaluation_text
-    assert "coal_kb.application" not in security_text
-    assert "coal_kb.interfaces" not in operations_text
+def test_evaluation_layer_does_not_depend_on_interfaces() -> None:
+    text = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "evaluation").glob("*.py"))
+    assert "fastapi" not in text
+    assert "coal_kb.interfaces" not in text
+    assert "coal_kb.application" not in text

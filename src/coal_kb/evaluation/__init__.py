@@ -1,14 +1,28 @@
-"""评估层：集中维护评估数据、检索指标和回答可审计性检查。"""
+"""提供统一评估数据、指标、Pipeline 和报告入口。"""
 
-from .datasets import EvalItem, load_eval_set, save_eval_template
-from .faithfulness import FaithfulnessEvaluator, simple_faithfulness_check
-from .retrieval import RetrievalEvaluator
+from coal_kb.evaluation.datasets import load_evaluation_cases, save_evaluation_cases
+from coal_kb.evaluation.models import (
+    AnswerObservation,
+    CaseEvaluationResult,
+    ClaimObservation,
+    EvaluationCase,
+    EvaluationObservation,
+    EvidenceReference,
+    QueryType,
+    RetrievedEvidence,
+)
+from coal_kb.evaluation.pipeline import EvaluationPipeline
 
 __all__ = [
-    "EvalItem",
-    "FaithfulnessEvaluator",
-    "RetrievalEvaluator",
-    "load_eval_set",
-    "save_eval_template",
-    "simple_faithfulness_check",
+    "AnswerObservation",
+    "CaseEvaluationResult",
+    "ClaimObservation",
+    "EvaluationCase",
+    "EvaluationObservation",
+    "EvaluationPipeline",
+    "EvidenceReference",
+    "QueryType",
+    "RetrievedEvidence",
+    "load_evaluation_cases",
+    "save_evaluation_cases",
 ]

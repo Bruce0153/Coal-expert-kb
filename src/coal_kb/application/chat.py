@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
-from coal_kb.application.ask import AskRuntime, build_response_payload, execute_query, log_query
+from coal_kb.application.ask import (
+    AskRuntime,
+    build_response_payload,
+    execute_query,
+    log_query,
+)
 from coal_kb.conversation.history import PreparedHistory, prepare_history_context
 from coal_kb.conversation.models import ConversationMessage, ConversationSummary
 from coal_kb.conversation.service import ConversationService
@@ -16,12 +21,17 @@ class ChatTurnResult:
     conversation: ConversationSummary
     user_message: ConversationMessage
     assistant_message: ConversationMessage
-    response: Dict[str, Any]
+    response: dict[str, Any]
     prepared_history: PreparedHistory
 
 
 class ChatOrchestrator:
-    def __init__(self, *, conversations: ConversationService, runtime: AskRuntime) -> None:
+    def __init__(
+        self,
+        *,
+        conversations: ConversationService,
+        runtime: AskRuntime,
+    ) -> None:
         self.conversations = conversations
         self.runtime = runtime
 
@@ -29,13 +39,19 @@ class ChatOrchestrator:
         self,
         *,
         query: str,
-        conversation_id: Optional[str] = None,
+        conversation_id: str | None = None,
         enable_llm: bool = False,
         save_trace: bool = False,
         debug: bool = False,
     ) -> ChatTurnResult:
-        conversation = self.conversations.ensure_conversation(conversation_id, title_hint=query)
-        prior_messages = self.conversations.list_messages(conversation.conversation_id)
+        """执行一轮带历史改写的会话。"""
+        conversation = self.conversations.ensure_conversation(
+            conversation_id,
+            title_hint=query,
+        )
+        prior_messages = self.conversations.list_messages(
+            conversation.conversation_id
+        )
         prepared_history = prepare_history_context(prior_messages, query)
 
         user_message = self.conversations.add_message(
@@ -53,7 +69,6 @@ class ChatOrchestrator:
             prepared_history.retrieval_query,
             enable_llm=enable_llm,
             original_query=query,
-            conversation_context=prepared_history.answer_history,
             history_used=prepared_history.used_history,
             history_reason=prepared_history.reason,
         )
@@ -80,8 +95,9 @@ class ChatOrchestrator:
             },
         )
         response["message_id"] = assistant_message.message_id
+        state = self.conversations.get_state(conversation.conversation_id)
         return ChatTurnResult(
-            conversation=self.conversations.get_state(conversation.conversation_id).conversation,
+            conversation=state.conversation,
             user_message=user_message,
             assistant_message=assistant_message,
             response=response,

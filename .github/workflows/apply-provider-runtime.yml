@@ -29,6 +29,7 @@ jobs:
         run: |
           python .migration/apply_provider_runtime.py
           python .migration/fix_provider_exports.py
+          python .migration/fix_provider_defaults.py
       - name: Remove migration files
         run: |
           rm -rf .migration

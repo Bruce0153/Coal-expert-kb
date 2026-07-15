@@ -84,9 +84,20 @@ jobs:
         if: steps.architecture.outcome == 'failure'
         run: exit 1
       - name: Foundation tests
+        id: foundation
+        continue-on-error: true
         run: |
           source "$SCRIPT_DIR/config.sh"
-          pytest -q "${FOUNDATION_TESTS[@]}"
+          pytest -q "${FOUNDATION_TESTS[@]}" > milestone_c_foundation.txt 2>&1
+      - name: Upload foundation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-c-foundation
+          path: milestone_c_foundation.txt
+      - name: Stop on foundation failure
+        if: steps.foundation.outcome == 'failure'
+        run: exit 1
       - name: Context tests
         run: |
           source "$SCRIPT_DIR/config.sh"

@@ -121,9 +121,8 @@ def build_runtime(
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.persistence.search import ElasticStore
     from coal_kb.infra.persistence.vector import ChromaStore
-    from coal_kb.infra.providers.embeddings import EmbeddingsConfig
-    from coal_kb.infra.providers.llm import LLMConfig
     from coal_kb.infra.providers.rerank import make_reranker
+    from coal_kb.infra.providers.tokenizers import make_tokenizer
     from coal_kb.ingestion.metadata.normalize import Ontology
     from coal_kb.retrieval.query import FilterParser
     from coal_kb.retrieval.service import ExpertRetriever
@@ -145,7 +144,7 @@ def build_runtime(
         store = ChromaStore(
             persist_dir=cfg.paths.chroma_dir,
             collection_name=cfg.chroma.collection_name,
-            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            embeddings_cfg=cfg.embeddings,
             embedding_model=cfg.embeddings.model,
         )
         chroma_factory = store.as_retriever
@@ -157,7 +156,7 @@ def build_runtime(
         )
         elastic_factory = elastic_store.make_retriever_factory(
             index=cfg.elastic.alias_current,
-            embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()),
+            embeddings_cfg=cfg.embeddings,
             candidates=active_k,
             rrf_k=cfg.retrieval.rrf_k,
             use_icu=cfg.elastic.enable_icu_analyzer,
@@ -169,7 +168,7 @@ def build_runtime(
         vector_factory = elastic_factory
     else:
         vector_factory = chroma_factory
-    reranker = make_reranker(cfg) if active_rerank else None
+    reranker = make_reranker(cfg.rerank) if active_rerank else None
     retriever = ExpertRetriever(
         vector_retriever_factory=vector_factory,
         k=active_k,
@@ -193,7 +192,7 @@ def build_runtime(
         allow_relax_in_stage2=cfg.retrieval.two_stage.allow_relax_in_stage2,
         elastic_store=elastic_store if active_backend == "elastic" else None,
         elastic_index=cfg.elastic.alias_current if active_backend == "elastic" else None,
-        embeddings_cfg=EmbeddingsConfig(**cfg.embeddings.model_dump()) if active_backend == "elastic" else None,
+        embeddings_cfg=cfg.embeddings if active_backend == "elastic" else None,
         elastic_use_icu=cfg.elastic.enable_icu_analyzer,
         tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
     )
@@ -202,7 +201,8 @@ def build_runtime(
         final_provider = cfg.llm.provider
     llm_config = None
     if enable_llm and final_provider != "none":
-        llm_config = LLMConfig(**{**cfg.llm.model_dump(), "provider": final_provider})
+        llm_config = cfg.llm.model_copy(deep=True)
+        llm_config.active.provider = final_provider
     return AskRuntime(
         cfg=cfg,
         backend=active_backend,
@@ -210,7 +210,7 @@ def build_runtime(
         mode=active_mode,
         planner=planner,
         retriever=retriever,
-        context_builder=ContextBuilder(),
+        context_builder=ContextBuilder(token_counter=make_tokenizer(cfg.tokenizer).count_tokens),
         answerer=Answerer(enable_llm=enable_llm and llm_config is not None, llm_config=llm_config),
         registry=registry,
         llm_config=llm_config,

@@ -1,36 +1,18 @@
+"""根据显式模式创建远程或本地 LLM。"""
+
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
-from typing import Optional
+from coal_kb.infra.providers.config import LLMProviderConfig
+from coal_kb.infra.providers.llm.local.openai_compatible import make_local_chat_llm
+from coal_kb.infra.providers.llm.remote.openai_compatible import make_remote_chat_llm
 
-from langchain_openai import ChatOpenAI
-
-
-@dataclass(frozen=True)
-class LLMConfig:
-    provider: str
-    base_url: str
-    api_key_env: str
-    model: str
-    api_key: Optional[str] = None
-    temperature: float = 0.0
-    timeout: int = 60
+LLMConfig = LLMProviderConfig
 
 
-def make_chat_llm(cfg: LLMConfig) -> ChatOpenAI:
-    if cfg.provider not in ("dashscope", "openai_compatible", "openai"):
-        raise ValueError(f"Unsupported llm.provider: {cfg.provider}")
-
-    api_key = cfg.api_key or os.getenv(cfg.api_key_env)
-    if not api_key:
-        raise RuntimeError(f"Missing env var: {cfg.api_key_env}")
-
-    # DashScope is OpenAI-compatible mode (chat/completions under base_url)
-    return ChatOpenAI(
-        model=cfg.model,
-        api_key=api_key,
-        base_url=cfg.base_url,
-        temperature=cfg.temperature,
-        timeout=cfg.timeout,
-    )
+def make_chat_llm(config: LLMProviderConfig):
+    """按配置模式创建 LLM，禁止远程失败后切换本地。"""
+    if config.mode == "remote":
+        return make_remote_chat_llm(config)
+    if config.mode == "local":
+        return make_local_chat_llm(config)
+    raise ValueError(f"Unsupported llm mode: {config.mode}")

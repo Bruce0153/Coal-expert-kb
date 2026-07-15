@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -16,7 +17,12 @@ from coal_kb.core.models.query import QueryPlan
 
 
 class ContextBuilder:
-    """保持原 ContextBuilder 接口和证据编号顺序。"""
+    """使用注入的模型 Tokenizer 构建预算内上下文。"""
+
+    def __init__(self, token_counter: Callable[[str], int] | None = None) -> None:
+        from coal_kb.tokenization import count_tokens
+
+        self._token_counter = token_counter or count_tokens
 
     def build(self, plan: QueryPlan, docs: list[Document]) -> ContextPackage:
         max_chunks = max(0, plan.context.max_evidence_chunks)
@@ -27,6 +33,7 @@ class ContextBuilder:
             diversified_docs,
             max_chunks=max_chunks,
             max_tokens=max_tokens,
+            count_tokens=self._token_counter,
         )
 
         grouped_docs: OrderedDict[str, list[Document]] = OrderedDict()

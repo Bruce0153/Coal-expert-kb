@@ -15,11 +15,26 @@ class RuntimeSettingsRequest(BaseModel):
     mode: Optional[str] = Field(default=None, pattern="^(strict|balanced|broad)?$")
     k: Optional[int] = Field(default=None, ge=1, le=50)
     rerank: bool = True
+    tokenizer_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
+    tokenizer_provider: Optional[str] = None
+    tokenizer_base_url: Optional[str] = None
+    tokenizer_api_key: Optional[str] = None
+    tokenizer_model: Optional[str] = None
+    embedding_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
+    embedding_provider: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_model: Optional[str] = None
+    rerank_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
+    rerank_provider: Optional[str] = None
+    rerank_base_url: Optional[str] = None
+    rerank_api_key: Optional[str] = None
+    rerank_model: Optional[str] = None
+    llm_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
     llm_provider: str = "none"
-    api_key: Optional[str] = Field(default=None, min_length=1)
-    provider_base_url: Optional[str] = Field(default=None, min_length=1)
-    llm_model: Optional[str] = Field(default=None, min_length=1)
-    embedding_model: Optional[str] = Field(default=None, min_length=1)
+    llm_base_url: Optional[str] = None
+    llm_api_key: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 class AskRequest(RuntimeSettingsRequest):
@@ -107,10 +122,10 @@ class ChatResponse(AskResponse):
 
 class SettingsDefaultsResponse(BaseModel):
     api_base_url: str = ""
-    provider_base_url: str
-    llm_provider: str
-    llm_model: str
-    embedding_model: str
+    tokenizer: Dict[str, Any]
+    embeddings: Dict[str, Any]
+    rerank_config: Dict[str, Any]
+    llm_config: Dict[str, Any]
     backend: str
     mode: str
     k: int
@@ -119,5 +134,6 @@ class SettingsDefaultsResponse(BaseModel):
     debug: bool = False
     backend_options: List[str] = Field(default_factory=list)
     mode_options: List[str] = Field(default_factory=list)
-    llm_provider_options: List[str] = Field(default_factory=list)
+    remote_provider_options: List[str] = Field(default_factory=list)
+    local_provider_options: Dict[str, List[str]] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)

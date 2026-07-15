@@ -83,11 +83,26 @@ const els = {
   settingsReset: $("settings-reset"),
   settingsNotes: $("settings-notes"),
   settingApiBaseUrl: $("setting-api-base-url"),
-  settingProviderBaseUrl: $("setting-provider-base-url"),
-  settingApiKey: $("setting-api-key"),
-  settingLlmProvider: $("setting-llm-provider"),
-  settingLlmModel: $("setting-llm-model"),
+  settingTokenizerMode: $("setting-tokenizer-mode"),
+  settingTokenizerProvider: $("setting-tokenizer-provider"),
+  settingTokenizerBaseUrl: $("setting-tokenizer-base-url"),
+  settingTokenizerApiKey: $("setting-tokenizer-api-key"),
+  settingTokenizerModel: $("setting-tokenizer-model"),
+  settingEmbeddingMode: $("setting-embedding-mode"),
+  settingEmbeddingProvider: $("setting-embedding-provider"),
+  settingEmbeddingBaseUrl: $("setting-embedding-base-url"),
+  settingEmbeddingApiKey: $("setting-embedding-api-key"),
   settingEmbeddingModel: $("setting-embedding-model"),
+  settingRerankMode: $("setting-rerank-mode"),
+  settingRerankProvider: $("setting-rerank-provider"),
+  settingRerankBaseUrl: $("setting-rerank-base-url"),
+  settingRerankApiKey: $("setting-rerank-api-key"),
+  settingRerankModel: $("setting-rerank-model"),
+  settingLlmMode: $("setting-llm-mode"),
+  settingLlmProvider: $("setting-llm-provider"),
+  settingLlmBaseUrl: $("setting-llm-base-url"),
+  settingLlmApiKey: $("setting-llm-api-key"),
+  settingLlmModel: $("setting-llm-model"),
   settingBackend: $("setting-backend"),
   settingMode: $("setting-mode"),
   settingK: $("setting-k"),
@@ -319,8 +334,8 @@ function mergeSettings(defaults, saved) {
   const d = defaults || {};
   return {
     apiBaseUrl: saved?.apiBaseUrl ?? d.api_base_url ?? "",
-    providerBaseUrl: saved?.providerBaseUrl ?? d.provider_base_url ?? "",
-    apiKey: saved?.apiKey ?? "",
+    llmBaseUrl: saved?.llmBaseUrl ?? d.provider_base_url ?? "",
+    llmApiKey: saved?.llmApiKey ?? "",
     llmProvider: saved?.llmProvider ?? d.llm_provider ?? "none",
     llmModel: saved?.llmModel ?? d.llm_model ?? "",
     embeddingModel: saved?.embeddingModel ?? d.embedding_model ?? "",
@@ -362,8 +377,8 @@ function syncSettingsForm() {
   populateSelect(els.settingBackend, defaults.backend_options, settings.backend);
   populateSelect(els.settingMode, defaults.mode_options, settings.mode);
   els.settingApiBaseUrl.value = settings.apiBaseUrl;
-  els.settingProviderBaseUrl.value = settings.providerBaseUrl;
-  els.settingApiKey.value = settings.apiKey;
+  els.settingProviderBaseUrl.value = settings.llmBaseUrl;
+  els.settingApiKey.value = settings.llmApiKey;
   els.settingLlmModel.value = settings.llmModel;
   els.settingEmbeddingModel.value = settings.embeddingModel;
   els.settingK.value = settings.k;
@@ -567,8 +582,26 @@ function buildChatPayload(message) {
     conversation_id: state.activeConversationId, message,
     llm: s.llm ?? true, debug: s.debug ?? false,
     backend: s.backend || "elastic", mode: s.mode || "broad", k: Number(s.k ?? 10), rerank: s.rerank ?? true,
-    llm_provider: s.llmProvider || "none", api_key: s.apiKey || null,
-    provider_base_url: s.providerBaseUrl || null, llm_model: s.llmModel || null, embedding_model: s.embeddingModel || null,
+    tokenizer_mode: s.tokenizerMode || null,
+    tokenizer_provider: s.tokenizerProvider || null,
+    tokenizer_base_url: s.tokenizerBaseUrl || null,
+    tokenizer_api_key: s.tokenizerApiKey || null,
+    tokenizer_model: s.tokenizerModel || null,
+    embedding_mode: s.embeddingMode || null,
+    embedding_provider: s.embeddingProvider || null,
+    embedding_base_url: s.embeddingBaseUrl || null,
+    embedding_api_key: s.embeddingApiKey || null,
+    embedding_model: s.embeddingModel || null,
+    rerank_mode: s.rerankMode || null,
+    rerank_provider: s.rerankProvider || null,
+    rerank_base_url: s.rerankBaseUrl || null,
+    rerank_api_key: s.rerankApiKey || null,
+    rerank_model: s.rerankModel || null,
+    llm_mode: s.llmMode || null,
+    llm_provider: s.llmProvider || "none",
+    llm_base_url: s.llmBaseUrl || null,
+    llm_api_key: s.llmApiKey || null,
+    llm_model: s.llmModel || null,
   };
 }
 
@@ -781,7 +814,7 @@ function resetSettings() { if (!state.defaults) return; state.settings = mergeSe
 function saveSettingsFromForm(event) {
   event.preventDefault();
   state.settings = {
-    apiBaseUrl: els.settingApiBaseUrl.value.trim(), providerBaseUrl: els.settingProviderBaseUrl.value.trim(), apiKey: els.settingApiKey.value.trim(),
+    apiBaseUrl: els.settingApiBaseUrl.value.trim(), llmBaseUrl: els.settingProviderBaseUrl.value.trim(), llmApiKey: els.settingApiKey.value.trim(),
     llmProvider: els.settingLlmProvider.value, llmModel: els.settingLlmModel.value.trim(), embeddingModel: els.settingEmbeddingModel.value.trim(),
     backend: els.settingBackend.value, mode: els.settingMode.value, k: Math.max(1, Number(els.settingK.value) || 6),
     rerank: els.settingRerank.checked, llm: els.settingLlm.checked, debug: els.settingDebug.checked,

@@ -47,9 +47,9 @@ def load_config() -> AppConfig:
         cfg.logging.level = env.log_level
 
     if env.llm_model:
-        cfg.llm.model = env.llm_model
+        cfg.llm.active.model = env.llm_model
     if env.embeddings_model:
-        cfg.embeddings.model = env.embeddings_model
+        cfg.embeddings.active.model = env.embeddings_model
 
     return _ensure_dirs(cfg)
 

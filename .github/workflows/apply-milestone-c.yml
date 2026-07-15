@@ -43,13 +43,13 @@ jobs:
       - name: Validate complex evaluation sample
         id: validate
         continue-on-error: true
-        run: PYTHONPATH=src python scripts/validate_complex_dataset.py --require-all-types > milestone-c-validation.txt 2>&1
+        run: PYTHONPATH=src python scripts/validate_complex_dataset.py --require-all-types > milestone_c_validation.txt 2>&1
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: milestone-c-validation
-          path: milestone-c-validation.txt
+          path: milestone_c_validation.txt
       - name: Stop on validation failure
         if: steps.validate.outcome == 'failure'
         run: exit 1
@@ -59,6 +59,7 @@ jobs:
         run: |
           git config user.name "repository-maintenance-bot"
           git config user.email "repository-maintenance-bot@users.noreply.github.com"
+          rm -f milestone_c_validation.txt
           git add -A
           git reset .github/workflows
           git commit -m "feat: complete Milestone C complex science QA"

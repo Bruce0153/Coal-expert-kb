@@ -26,7 +26,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Apply provider runtime migration
-        run: python .migration/apply_provider_runtime.py
+        run: |
+          python .migration/apply_provider_runtime.py
+          python .migration/fix_provider_exports.py
       - name: Remove migration files
         run: |
           rm -rf .migration

@@ -30,6 +30,7 @@ jobs:
           python .migration/milestone_c_core.py
           python .migration/milestone_c_integration.py
           python .migration/milestone_c_tests.py
+          python .migration/milestone_c_fixes.py
       - name: Remove migration files
         run: rm -rf .migration
       - name: Install CI dependencies
@@ -42,7 +43,7 @@ jobs:
       - name: Validate complex evaluation sample
         id: validate
         continue-on-error: true
-        run: python scripts/validate_complex_dataset.py --require-all-types > milestone-c-validation.txt 2>&1
+        run: PYTHONPATH=src python scripts/validate_complex_dataset.py --require-all-types > milestone-c-validation.txt 2>&1
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4

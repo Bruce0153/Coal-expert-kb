@@ -1,4 +1,4 @@
-"""构造保持原语义的硬过滤和软约束计划。"""
+"""构造硬过滤、软约束和范围放宽计划。"""
 
 from __future__ import annotations
 
@@ -21,13 +21,14 @@ def build_plan(
     max_relax_steps: int = config.DEFAULT_MAX_RELAX_STEPS,
     range_expand_schedule: list[float] | None = None,
 ) -> RetrievalPlan:
-    hard_where = constraint_set.to_where_hard()
-    soft_constraints = constraint_set.soft_features()
+    """从唯一约束模型生成检索执行计划。"""
     schedule = range_expand_schedule or config.DEFAULT_RANGE_EXPAND_SCHEDULE
     steps = min(max_relax_steps, len(schedule))
-    relax_steps = [f"expand_numeric_range={int(schedule[index] * 100)}%" for index in range(steps)]
     return RetrievalPlan(
-        hard_where=hard_where,
-        soft_constraints=soft_constraints,
-        relax_steps=relax_steps,
+        hard_where=constraint_set.to_where_hard(),
+        soft_constraints=constraint_set.soft_constraints,
+        relax_steps=[
+            f"expand_numeric_range={int(schedule[index] * 100)}%"
+            for index in range(steps)
+        ],
     )

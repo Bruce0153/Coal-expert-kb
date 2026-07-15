@@ -7,9 +7,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.documents import Document
+
 from coal_kb.complex_qa.models import ComplexExecutionResult
-from coal_kb.complex_qa.utils import clone_plan_for_subquery, deduplicate_documents, tag_documents
+from coal_kb.complex_qa.planning import clone_plan_for_subquery
 from coal_kb.core.models.query import QueryPlan
+from coal_kb.utils.documents import copy_documents_with_metadata, deduplicate_documents
 
 
 @dataclass
@@ -20,8 +23,8 @@ class MultiHopExecutor:
     max_steps: int
 
     def process(self, plan: QueryPlan) -> ComplexExecutionResult:
-        documents = []
-        steps = []
+        documents: list[Document] = []
+        steps: list[dict[str, Any]] = []
         bridge_terms: list[str] = []
         for subquery in plan.complex.subqueries[: self.max_steps]:
             effective_query = subquery.query
@@ -29,9 +32,17 @@ class MultiHopExecutor:
                 effective_query = f"{effective_query} {' '.join(bridge_terms)}"
             effective = subquery.model_copy(update={"query": effective_query})
             local_trace: dict[str, Any] = {}
-            hits = self.retriever.execute(clone_plan_for_subquery(plan, effective), trace=local_trace)
-            tagged = tag_documents(hits, complex_route="multi_hop", complex_role=subquery.subquery_id)
-            documents.extend(tagged)
+            hits = self.retriever.execute(
+                clone_plan_for_subquery(plan, effective),
+                trace=local_trace,
+            )
+            documents.extend(
+                copy_documents_with_metadata(
+                    hits,
+                    complex_route="multi_hop",
+                    complex_role=subquery.subquery_id,
+                )
+            )
             bridge_terms = self._extract_bridge_terms(hits)
             steps.append(
                 {
@@ -44,13 +55,21 @@ class MultiHopExecutor:
             )
         return ComplexExecutionResult(
             documents=deduplicate_documents(documents),
-            trace={"query_type": "multi_hop", "steps": steps, "chain_complete": bool(steps) and all(step["hits"] > 0 for step in steps)},
+            trace={
+                "query_type": "multi_hop",
+                "steps": steps,
+                "chain_complete": bool(steps)
+                and all(int(step["hits"]) > 0 for step in steps),
+            },
         )
 
     @staticmethod
-    def _extract_bridge_terms(documents: list[Any]) -> list[str]:
+    def _extract_bridge_terms(documents: list[Document]) -> list[str]:
         """从上一跳证据中稳定抽取少量中间术语。"""
-        text = " ".join(str(document.page_content or "")[:800] for document in documents[:3]).lower()
+        text = " ".join(
+            str(document.page_content or "")[:800]
+            for document in documents[:3]
+        ).lower()
         terms = re.findall(r"[a-z][a-z0-9_-]{2,}|[一-鿿]{2,6}", text)
         blocked = {"研究", "结果", "实验", "条件", "影响", "过程", "表明", "通过", "进行"}
         counts = Counter(term for term in terms if term not in blocked)

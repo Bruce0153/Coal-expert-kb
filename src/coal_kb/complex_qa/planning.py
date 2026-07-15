@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 
 from coal_kb.complex_qa.router import route_question
-from coal_kb.core.models.query import AggregationSpec, ComplexQuestionSpec, SubQuerySpec
+from coal_kb.core.models.query import (
+    AggregationSpec,
+    ComplexQuestionSpec,
+    QueryPlan,
+    SubQuerySpec,
+)
 
 _FIELD_PATTERNS = (
     (r"温度|temperature", "T_K"),
@@ -24,6 +29,20 @@ _GROUP_PATTERNS = (
     (r"按反应器|不同反应器", "reactor_type"),
     (r"按气化剂|不同气化剂", "gas_agent"),
 )
+
+
+def clone_plan_for_subquery(plan: QueryPlan, subquery: SubQuerySpec) -> QueryPlan:
+    """克隆计划并将复杂子问题转换为普通事实检索。"""
+    cloned = plan.model_copy(deep=True)
+    cloned.query.raw = subquery.query
+    cloned.query.normalized = subquery.query
+    cloned.query.rewritten = None
+    cloned.complex = ComplexQuestionSpec(
+        query_type="fact",
+        confidence=1.0,
+        reason="复杂路线内部子检索",
+    )
+    return cloned
 
 
 def _comparison_entities(query: str) -> list[str]:
@@ -74,7 +93,12 @@ def _aggregation_spec(query: str) -> AggregationSpec:
     return AggregationSpec(operation=operation, field=field, group_by=group_by, top_k=top_k)
 
 
-def build_complex_spec(query: str, *, max_subqueries: int, max_multi_hop_steps: int) -> ComplexQuestionSpec:
+def build_complex_spec(
+    query: str,
+    *,
+    max_subqueries: int,
+    max_multi_hop_steps: int,
+) -> ComplexQuestionSpec:
     """根据问题生成统一复杂问答计划。"""
     query_type, confidence, reason = route_question(query)
     subqueries: list[SubQuerySpec] = []
@@ -94,30 +118,51 @@ def build_complex_spec(query: str, *, max_subqueries: int, max_multi_hop_steps: 
                 )
         else:
             subqueries = [
-                SubQuerySpec(subquery_id="comparison_1", query=f"{query} 对象一 证据", purpose="检索第一侧证据"),
-                SubQuerySpec(subquery_id="comparison_2", query=f"{query} 对象二 证据", purpose="检索第二侧证据"),
+                SubQuerySpec(
+                    subquery_id="comparison_1",
+                    query=f"{query} 对象一 证据",
+                    purpose="检索第一侧证据",
+                ),
+                SubQuerySpec(
+                    subquery_id="comparison_2",
+                    query=f"{query} 对象二 证据",
+                    purpose="检索第二侧证据",
+                ),
             ]
     elif query_type == "multi_hop":
-        multi_hop_templates: tuple[tuple[str, str, str, list[str]], ...] = (
+        templates: tuple[tuple[str, str, str, list[str]], ...] = (
             ("hop_1", f"{query} 关键反应 中间过程", "识别关键中间过程", []),
             ("hop_2", f"{query} 中间过程 对目标结果的影响", "连接中间过程与目标结果", ["hop_1"]),
             ("hop_3", f"{query} 实验条件 机制链 证据", "核验完整机制链及适用条件", ["hop_2"]),
         )
-        for subquery_id, subquery, purpose, dependencies in multi_hop_templates[:max_multi_hop_steps]:
-            subqueries.append(SubQuerySpec(subquery_id=subquery_id, query=subquery, purpose=purpose, depends_on=dependencies))
+        for subquery_id, subquery, purpose, dependencies in templates[:max_multi_hop_steps]:
+            subqueries.append(
+                SubQuerySpec(
+                    subquery_id=subquery_id,
+                    query=subquery,
+                    purpose=purpose,
+                    depends_on=dependencies,
+                )
+            )
     elif query_type == "aggregation":
         aggregation = _aggregation_spec(query)
     elif query_type == "table":
-        subqueries.append(SubQuerySpec(subquery_id="table_1", query=query, purpose="定位相关表格、行和单元格"))
+        subqueries.append(
+            SubQuerySpec(
+                subquery_id="table_1",
+                query=query,
+                purpose="定位相关表格、行和单元格",
+            )
+        )
     elif query_type == "cross_document":
-        cross_document_templates: tuple[tuple[str, str, str], ...] = (
+        templates = (
             ("cross_support", f"{query} 支持性证据", "检索支持主要结论的文档"),
             ("cross_conflict", f"{query} 相反结果 冲突证据", "检索相反或冲突结论"),
             ("cross_conditions", f"{query} 实验条件差异", "解释文献差异的条件来源"),
         )
         subqueries = [
             SubQuerySpec(subquery_id=item[0], query=item[1], purpose=item[2])
-            for item in cross_document_templates
+            for item in templates
         ]
 
     return ComplexQuestionSpec(

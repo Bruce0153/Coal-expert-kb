@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
-import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.documents import Document
 
 from coal_kb.application import config
+from coal_kb.infra.observability.trace import build_retrieval_trace_summary
 
 if TYPE_CHECKING:
     from coal_kb.answering import Answerer, AnswerResult
@@ -22,10 +21,6 @@ if TYPE_CHECKING:
     from coal_kb.infra.providers.llm import LLMConfig
     from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
-
-logger = logging.getLogger(__name__)
-
-HELP_TEXT = config.HELP_TEXT
 
 
 @dataclass
@@ -40,7 +35,7 @@ class AskRuntime:
     complex_question_service: ComplexQuestionService
     answerer: Answerer
     registry: RegistrySQLite
-    llm_config: Optional[LLMConfig]
+    llm_config: LLMConfig | None
 
 
 @dataclass
@@ -48,20 +43,22 @@ class AskExecution:
     query: str
     retrieval_query: str
     plan: QueryPlan
-    docs: List[Document]
-    trace: Dict[str, Any]
-    context_debug: Dict[str, Any]
+    docs: list[Document]
+    trace: dict[str, Any]
+    context_debug: dict[str, Any]
     result: AnswerResult
-    timings_ms: Dict[str, float]
+    timings_ms: dict[str, float]
     history_used: bool = False
     history_reason: str = "standalone_query"
 
 
 def normalize_query(query: str) -> str:
+    """折叠查询中的多余空白。"""
     return " ".join(query.strip().split())
 
 
-def parse_command(query: str) -> Optional[str]:
+def parse_command(query: str) -> str | None:
+    """解析交互式 CLI 的内置命令。"""
     normalized = query.strip().lower()
     if normalized in {"exit", "quit"}:
         return "exit"
@@ -73,32 +70,44 @@ def parse_command(query: str) -> Optional[str]:
 
 
 class _CombinedRetriever:
-    def __init__(self, chroma: Any, elastic: Any, k: int, rrf_k: int = config.DEFAULT_RRF_K) -> None:
+    def __init__(self, chroma: Any, elastic: Any, k: int, rrf_k: int) -> None:
         self._chroma = chroma
         self._elastic = elastic
         self._k = k
         self._rrf_k = rrf_k
 
-    def invoke(self, query: str) -> List[Document]:
-        chroma_docs = []
-        elastic_docs = []
-        if self._chroma is not None:
-            chroma_docs = self._chroma.get_relevant_documents(query) if hasattr(self._chroma, "get_relevant_documents") else self._chroma.invoke(query)
-        if self._elastic is not None:
-            elastic_docs = self._elastic.invoke(query)
-        if not chroma_docs and not elastic_docs:
+    def invoke(self, query: str) -> list[Document]:
+        chroma_documents = self._invoke(self._chroma, query)
+        elastic_documents = self._invoke(self._elastic, query)
+        if not chroma_documents and not elastic_documents:
             return []
         from coal_kb.recall import rrf_fuse
 
-        fused = rrf_fuse(elastic_docs, chroma_docs, k=self._rrf_k)
-        return fused[: self._k]
+        return rrf_fuse(
+            elastic_documents,
+            chroma_documents,
+            k=self._rrf_k,
+        )[: self._k]
+
+    @staticmethod
+    def _invoke(retriever: Any, query: str) -> list[Document]:
+        if retriever is None:
+            return []
+        if hasattr(retriever, "invoke"):
+            return list(retriever.invoke(query))
+        return list(retriever.get_relevant_documents(query))
 
 
-def _combine_factories(chroma_factory: Any, elastic_factory: Any, *, rrf_k: int = config.DEFAULT_RRF_K):
-    def factory(k: int, where: Optional[Dict[str, Any]] = None):
+def _combine_factories(
+    chroma_factory: Any,
+    elastic_factory: Any,
+    *,
+    rrf_k: int,
+):
+    def factory(k: int, where: dict[str, Any] | None = None) -> _CombinedRetriever:
         chroma = chroma_factory(k=k, where=where) if chroma_factory else None
         elastic = elastic_factory(k=k, where=where) if elastic_factory else None
-        return _CombinedRetriever(chroma=chroma, elastic=elastic, k=k, rrf_k=rrf_k)
+        return _CombinedRetriever(chroma, elastic, k, rrf_k)
 
     return factory
 
@@ -106,15 +115,15 @@ def _combine_factories(chroma_factory: Any, elastic_factory: Any, *, rrf_k: int 
 def build_runtime(
     cfg: AppConfig,
     *,
-    backend: Optional[str] = None,
-    k: Optional[int] = None,
-    rerank_enabled: Optional[bool] = None,
-    rerank_top_n: Optional[int] = None,
-    rerank_model: Optional[str] = None,
-    mode: Optional[str] = None,
+    backend: str | None = None,
+    k: int | None = None,
+    rerank_enabled: bool | None = None,
+    rerank_top_n: int | None = None,
+    mode: str | None = None,
     enable_llm: bool = False,
     llm_provider: str = "none",
 ) -> AskRuntime:
+    """从应用配置组装唯一问答运行时。"""
     from coal_kb.answering import Answerer
     from coal_kb.complex_qa import ComplexQuestionService
     from coal_kb.context import ContextBuilder
@@ -128,27 +137,33 @@ def build_runtime(
     from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
-    onto = Ontology.load(config.ONTOLOGY_PATH)
-    planner = QueryPlanner(filter_parser=FilterParser(onto=onto))
     active_backend = backend or cfg.backend
     active_k = int(k or cfg.retrieval.k)
     active_mode = mode or cfg.retrieval.mode
-    active_rerank = cfg.retrieval.rerank_enabled if rerank_enabled is None else rerank_enabled
+    active_rerank = (
+        cfg.retrieval.rerank_enabled
+        if rerank_enabled is None
+        else rerank_enabled
+    )
     active_rerank_top_n = int(rerank_top_n or cfg.retrieval.rerank_top_n)
-    if rerank_model:
-        cfg.retrieval.rerank_model = rerank_model
+
+    planner = QueryPlanner(
+        filter_parser=FilterParser(onto=Ontology.load(config.ONTOLOGY_PATH))
+    )
     registry = RegistrySQLite(cfg.registry.sqlite_path)
     chroma_factory = None
     elastic_factory = None
     elastic_store = None
+
     if active_backend in {"chroma", "both"}:
-        store = ChromaStore(
+        chroma_store = ChromaStore(
             persist_dir=cfg.paths.chroma_dir,
             collection_name=cfg.chroma.collection_name,
             embeddings_cfg=cfg.embeddings,
             embedding_model=cfg.embeddings.model,
         )
-        chroma_factory = store.as_retriever
+        chroma_factory = chroma_store.as_retriever
+
     if active_backend in {"elastic", "both"}:
         elastic_store = ElasticStore(
             host=cfg.elastic.host,
@@ -161,30 +176,44 @@ def build_runtime(
             candidates=active_k,
             rrf_k=cfg.retrieval.rrf_k,
             use_icu=cfg.elastic.enable_icu_analyzer,
-            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
+            tenant_id=(
+                cfg.tenancy.default_tenant_id
+                if cfg.tenancy.enabled
+                else None
+            ),
         )
+
     if active_backend == "both":
-        vector_factory = _combine_factories(chroma_factory, elastic_factory, rrf_k=cfg.retrieval.rrf_k)
+        vector_factory = _combine_factories(
+            chroma_factory,
+            elastic_factory,
+            rrf_k=cfg.retrieval.rrf_k,
+        )
     elif active_backend == "elastic":
         vector_factory = elastic_factory
-    else:
+    elif active_backend == "chroma":
         vector_factory = chroma_factory
-    reranker = make_reranker(cfg.rerank) if active_rerank else None
+    else:
+        raise ValueError(f"Unsupported retrieval backend: {active_backend}")
+
+    if vector_factory is None:
+        raise RuntimeError(f"Retrieval backend is unavailable: {active_backend}")
+
     retriever = ExpertRetriever(
         vector_retriever_factory=vector_factory,
         k=active_k,
         rerank_enabled=active_rerank,
         rerank_top_n=active_rerank_top_n,
-        reranker=reranker,
+        reranker=make_reranker(cfg.rerank) if active_rerank else None,
         max_per_source=cfg.retrieval.max_per_source,
         max_relax_steps=cfg.retrieval.max_relax_steps,
         range_expand_schedule=cfg.retrieval.range_expand_schedule,
         mode=active_mode,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
-        use_fuse=(active_backend != "elastic"),
-        where_full=(active_backend == "elastic"),
-        two_stage_enabled=(active_backend == "elastic" and cfg.retrieval.two_stage.enabled),
+        two_stage_enabled=(
+            active_backend == "elastic" and cfg.retrieval.two_stage.enabled
+        ),
         parent_k_candidates=cfg.retrieval.two_stage.parent_k_candidates,
         parent_k_final=cfg.retrieval.two_stage.parent_k_final,
         max_parents=cfg.retrieval.two_stage.max_parents,
@@ -192,18 +221,24 @@ def build_runtime(
         child_k_final=cfg.retrieval.two_stage.child_k_final,
         allow_relax_in_stage2=cfg.retrieval.two_stage.allow_relax_in_stage2,
         elastic_store=elastic_store if active_backend == "elastic" else None,
-        elastic_index=cfg.elastic.alias_current if active_backend == "elastic" else None,
-        embeddings_cfg=cfg.embeddings if active_backend == "elastic" else None,
+        elastic_index=(
+            cfg.elastic.alias_current if active_backend == "elastic" else None
+        ),
+        embeddings_cfg=(cfg.embeddings if active_backend == "elastic" else None),
         elastic_use_icu=cfg.elastic.enable_icu_analyzer,
-        tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
+        tenant_id=(
+            cfg.tenancy.default_tenant_id
+            if cfg.tenancy.enabled
+            else None
+        ),
     )
-    final_provider = llm_provider
-    if enable_llm and final_provider == "none":
-        final_provider = cfg.llm.provider
+
     llm_config = None
-    if enable_llm and final_provider != "none":
+    if enable_llm:
         llm_config = cfg.llm.model_copy(deep=True)
-        llm_config.active.provider = final_provider
+        if llm_provider != "none":
+            llm_config.active.provider = llm_provider
+
     return AskRuntime(
         cfg=cfg,
         backend=active_backend,
@@ -211,7 +246,9 @@ def build_runtime(
         mode=active_mode,
         planner=planner,
         retriever=retriever,
-        context_builder=ContextBuilder(token_counter=make_tokenizer(cfg.tokenizer).count_tokens),
+        context_builder=ContextBuilder(
+            token_counter=make_tokenizer(cfg.tokenizer).count_tokens
+        ),
         complex_question_service=ComplexQuestionService(
             retriever=retriever,
             sqlite_path=cfg.paths.sqlite_path,
@@ -222,9 +259,14 @@ def build_runtime(
             aggregation_evidence_limit=cfg.complex_qa.aggregation_evidence_limit,
             table_top_k=cfg.complex_qa.table_top_k,
             cross_document_min_sources=cfg.complex_qa.cross_document_min_sources,
-            cross_document_max_per_source=cfg.complex_qa.cross_document_max_per_source,
+            cross_document_max_per_source=(
+                cfg.complex_qa.cross_document_max_per_source
+            ),
         ),
-        answerer=Answerer(enable_llm=enable_llm and llm_config is not None, llm_config=llm_config),
+        answerer=Answerer(
+            enable_llm=enable_llm and llm_config is not None,
+            llm_config=llm_config,
+        ),
         registry=registry,
         llm_config=llm_config,
     )
@@ -235,33 +277,47 @@ def execute_query(
     raw_query: str,
     *,
     enable_llm: bool = False,
-    original_query: Optional[str] = None,
-    conversation_context: Optional[str] = None,
+    original_query: str | None = None,
     history_used: bool = False,
     history_reason: str = "standalone_query",
 ) -> AskExecution:
+    """执行规划、检索、上下文和回答链路。"""
     query = normalize_query(original_query or raw_query)
     retrieval_query = normalize_query(raw_query)
     if not retrieval_query:
         raise ValueError("query is empty")
-    trace: Dict[str, Any] = {}
+
+    trace: dict[str, Any] = {}
     started = time.monotonic()
-    plan = runtime.planner.build_plan(retrieval_query, runtime.cfg, enable_llm=False, llm_config=None)
+    plan = runtime.planner.build_plan(
+        retrieval_query,
+        runtime.cfg,
+        enable_llm=False,
+        llm_config=None,
+    )
     plan_ms = (time.monotonic() - started) * 1000
+
     started = time.monotonic()
-    docs = runtime.complex_question_service.process(plan, trace=trace)
+    documents = runtime.complex_question_service.process(plan, trace=trace)
     retrieve_ms = (time.monotonic() - started) * 1000
+
     started = time.monotonic()
-    context_package = runtime.context_builder.build(plan, docs)
+    context_package = runtime.context_builder.build(plan, documents)
     context_ms = (time.monotonic() - started) * 1000
+
     started = time.monotonic()
-    result = runtime.answerer.answer(plan, context_package)
+    result = runtime.answerer.answer(
+        plan,
+        context_package,
+        enable_llm=enable_llm,
+    )
     answer_ms = (time.monotonic() - started) * 1000
+
     return AskExecution(
         query=query,
         retrieval_query=retrieval_query,
         plan=plan,
-        docs=docs,
+        docs=documents,
         trace=trace,
         context_debug=context_package.debug,
         result=result,
@@ -277,35 +333,38 @@ def execute_query(
     )
 
 
-def retrieval_diagnostics(execution: AskExecution, *, limit: int = config.DEFAULT_DIAGNOSTIC_LIMIT) -> List[Dict[str, Any]]:
+def retrieval_diagnostics(
+    execution: AskExecution,
+    *,
+    limit: int = config.DEFAULT_DIAGNOSTIC_LIMIT,
+) -> list[dict[str, Any]]:
+    """生成检索结果摘要。"""
     score_map = {
         item.get("chunk_id"): item.get("score")
         for item in execution.trace.get("condition_score_top3", [])
         if isinstance(item, dict)
     }
-    diagnostics: List[Dict[str, Any]] = []
-    for doc in execution.docs[:limit]:
-        meta = doc.metadata or {}
-        chunk_id = meta.get("chunk_id")
-        diagnostics.append(
-            {
-                "chunk_id": chunk_id,
-                "source_file": meta.get("source_file"),
-                "title": meta.get("title"),
-                "page": meta.get("page"),
-                "heading_path": meta.get("heading_path"),
-                "score": score_map.get(chunk_id),
-            }
-        )
-    return diagnostics
+    return [
+        {
+            "chunk_id": metadata.get("chunk_id"),
+            "source_file": metadata.get("source_file"),
+            "title": metadata.get("title"),
+            "page": metadata.get("page"),
+            "heading_path": metadata.get("heading_path"),
+            "score": score_map.get(metadata.get("chunk_id")),
+        }
+        for document in execution.docs[:limit]
+        for metadata in [document.metadata or {}]
+    ]
 
 
-def ordered_citations(execution: AskExecution) -> List[Dict[str, Any]]:
+def ordered_citations(execution: AskExecution) -> list[dict[str, Any]]:
+    """按回答实际引用顺序组织引用。"""
     citations = execution.result.citations
-    preferred = execution.result.referenced_labels or list(citations.keys())
-    ordered: List[Dict[str, Any]] = []
-    seen = set()
-    for label in preferred + list(citations.keys()):
+    preferred = execution.result.referenced_labels or list(citations)
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for label in preferred + list(citations):
         if label in seen or label not in citations:
             continue
         seen.add(label)
@@ -315,60 +374,33 @@ def ordered_citations(execution: AskExecution) -> List[Dict[str, Any]]:
     return ordered
 
 
-def format_claims(execution: AskExecution) -> str:
-    lines: List[str] = []
-    for claim in execution.result.claim_items:
-        citations = " ".join(f"[{label}]" for label in claim.get("citations", []))
-        support = claim.get("support")
-        support_text = f" ({support})" if support else ""
-        lines.append(f"- {claim.get('text', '')} {citations}{support_text}".rstrip())
-    return "\n".join(lines)
+def _trace_summary(execution: AskExecution) -> dict[str, Any]:
+    return build_retrieval_trace_summary(
+        retrieval_query=execution.retrieval_query,
+        history_used=execution.history_used,
+        history_reason=execution.history_reason,
+        trace=execution.trace,
+    )
 
 
-def format_sources(execution: AskExecution) -> str:
-    lines: List[str] = []
-    for item in ordered_citations(execution):
-        page = item.get("page")
-        heading = item.get("heading_path")
-        page_text = f" | page={page}" if page is not None else ""
-        heading_text = f" | heading={heading}" if heading else ""
-        lines.append(f"[{item['label']}] {item.get('source_file', 'unknown')}{page_text}{heading_text}")
-        lines.append(f"  {item.get('snippet', '')}")
-    return "\n".join(lines)
-
-
-def format_source_cards(execution: AskExecution) -> str:
-    lines: List[str] = []
-    for card in execution.result.source_cards:
-        pages = ", ".join(str(page) for page in card.get("pages", []))
-        headings = ", ".join(card.get("headings", []))
-        labels = ", ".join(f"[{label}]" for label in card.get("evidence_labels", []))
-        suffix = []
-        if pages:
-            suffix.append(f"pages={pages}")
-        if headings:
-            suffix.append(f"headings={headings}")
-        details = " | ".join(suffix)
-        title = card.get("title") or card.get("source_file", "unknown")
-        lines.append(f"- {title} ({labels})" + (f" | {details}" if details else ""))
-        lines.append(f"  {card.get('snippet_preview', '')}")
-    return "\n".join(lines)
-
-
-def retrieval_trace_summary(execution: AskExecution) -> Dict[str, Any]:
-    return {
-        "retrieval_query": execution.retrieval_query,
-        "history_used": execution.history_used,
-        "history_reason": execution.history_reason,
-        "vector_candidates": execution.trace.get("vector_candidates"),
-        "postfiltered_count": execution.trace.get("postfiltered_count"),
-        "source_distribution": execution.trace.get("source_distribution"),
-        "heading_distribution": execution.trace.get("heading_distribution"),
+def build_response_payload(
+    execution: AskExecution,
+    *,
+    include_debug: bool = False,
+) -> dict[str, Any]:
+    """构建 CLI 与 API 共用的响应字典。"""
+    diagnostics: dict[str, Any] = {
+        "retrieval": retrieval_diagnostics(execution),
+        "context": execution.context_debug,
     }
-
-
-def build_response_payload(execution: AskExecution, *, include_debug: bool = False) -> Dict[str, Any]:
-    payload = {
+    if include_debug:
+        diagnostics.update(
+            {
+                "trace": execution.trace,
+                "answer_debug": execution.result.debug,
+            }
+        )
+    return {
         "query": execution.query,
         "retrieval_query": execution.retrieval_query,
         "answer": execution.result.answer_text,
@@ -379,47 +411,43 @@ def build_response_payload(execution: AskExecution, *, include_debug: bool = Fal
         "evidence_items": execution.result.evidence_items,
         "source_cards": execution.result.source_cards,
         "claim_items": execution.result.claim_items,
-        "retrieval_trace_summary": retrieval_trace_summary(execution),
+        "retrieval_trace_summary": _trace_summary(execution),
         "evidence_sufficiency": execution.result.evidence_sufficiency,
         "confidence_score": execution.result.confidence_score,
         "timings_ms": execution.timings_ms,
-        "diagnostics": {
-            "retrieval": retrieval_diagnostics(execution),
-            "context": execution.context_debug,
-            "trace": execution.trace,
-            "answer_debug": execution.result.debug,
-        }
-        if include_debug
-        else {
-            "retrieval": retrieval_diagnostics(execution),
-            "context": execution.context_debug,
-        },
+        "diagnostics": diagnostics,
     }
-    return payload
 
 
-def format_debug_info(execution: AskExecution) -> str:
-    return json.dumps(build_response_payload(execution, include_debug=True), ensure_ascii=False, indent=2)
-
-
-def log_query(runtime: AskRuntime, execution: AskExecution, *, save_trace: bool = False) -> None:
+def log_query(
+    runtime: AskRuntime,
+    execution: AskExecution,
+    *,
+    save_trace: bool = False,
+) -> None:
+    """将查询、证据和可选 Trace 写入注册库。"""
+    constraints: dict[str, Any] = {"plan": execution.plan.to_dict()}
+    if save_trace:
+        constraints.update(
+            {
+                "retrieval_trace": execution.trace,
+                "retrieval_trace_summary": _trace_summary(execution),
+                "citations": execution.result.citations,
+                "referenced_labels": execution.result.referenced_labels,
+                "context_debug": execution.context_debug,
+                "evidence_sufficiency": execution.result.evidence_sufficiency,
+                "confidence_score": execution.result.confidence_score,
+            }
+        )
     runtime.registry.log_query(
         query=execution.plan.query.rewritten or execution.plan.query.normalized,
         filters=execution.trace.get("where") or {},
-        constraints={
-            "plan": execution.plan.to_dict(),
-            "retrieval_trace": execution.trace,
-            "retrieval_trace_summary": retrieval_trace_summary(execution),
-            "citations": execution.result.citations,
-            "referenced_labels": execution.result.referenced_labels,
-            "context_debug": execution.context_debug,
-            "evidence_sufficiency": execution.result.evidence_sufficiency,
-            "confidence_score": execution.result.confidence_score,
-        }
-        if save_trace
-        else {"plan": execution.plan.to_dict()},
-        top_chunk_ids=[doc.metadata.get("chunk_id") for doc in execution.docs],
-        top_source_files=[doc.metadata.get("source_file") for doc in execution.docs],
+        constraints=constraints,
+        top_chunk_ids=[document.metadata.get("chunk_id") for document in execution.docs],
+        top_source_files=[
+            document.metadata.get("source_file")
+            for document in execution.docs
+        ],
         latency_ms=execution.timings_ms["total"],
         backend=runtime.backend,
         tenant_id=None,

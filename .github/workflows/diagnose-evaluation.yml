@@ -1,0 +1,62 @@
+name: Diagnose Evaluation
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SCRIPT_DIR: ${{ github.workspace }}/scripts/quality
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/ci.txt
+      - name: Compile
+        id: compile
+        continue-on-error: true
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          python -m compileall "${SOURCE_PATHS[@]}" > compile-report.txt 2>&1
+      - name: Upload compile report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-report
+          path: compile-report.txt
+      - name: Stop on compile failure
+        if: steps.compile.outcome == 'failure'
+        run: exit 1
+      - name: Ruff
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          ruff check "${SOURCE_PATHS[@]}" --select E,F,I,B --ignore E501,B905
+      - name: Mypy
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          MYPYPATH="$REPO_ROOT/src" mypy --follow-imports=skip --ignore-missing-imports "${MYPY_TARGETS[@]}"
+      - name: Architecture
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          pytest -q "${ARCHITECTURE_TESTS[@]}"
+      - name: Foundation
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          pytest -q "${FOUNDATION_TESTS[@]}"
+      - name: Context
+        run: |
+          source "$SCRIPT_DIR/config.sh"
+          pytest -q "${RAG_TESTS[@]}"

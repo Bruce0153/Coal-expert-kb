@@ -1,42 +1,36 @@
-"""读取评估数据并生成手工标注模板。"""
+"""读取、验证并写出版本化评估数据集。"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from coal_kb.evaluation import config
+from tqdm import tqdm
 
-
-@dataclass
-class EvalItem:
-    """保存问题和最小来源标注。"""
-
-    question: str
-    gold_sources: list[dict[str, Any]]
+from coal_kb.evaluation.models import EvaluationCase
 
 
-def load_eval_set(path: str) -> list[EvalItem]:
-    """从 JSONL 加载评估问题，行为与旧实现一致。"""
+def load_evaluation_cases(path: str | Path) -> list[EvaluationCase]:
+    """从 JSONL 加载并验证评估案例。"""
     source = Path(path)
-    items: list[EvalItem] = []
-    for line in source.read_text(encoding="utf-8").splitlines():
+    lines = source.read_text(encoding="utf-8").splitlines()
+    cases: list[EvaluationCase] = []
+    for row_number, line in enumerate(tqdm(lines, total=len(lines), desc="EvaluationDataset"), start=1):
         if not line.strip():
             continue
-        obj = json.loads(line)
-        items.append(EvalItem(question=obj["question"], gold_sources=obj.get("gold_sources") or []))
-    return items
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            raise TypeError(f"Evaluation row {row_number} must be a JSON object")
+        cases.append(EvaluationCase.from_dict(payload, row_number=row_number))
+    case_ids = [case.case_id for case in cases]
+    if len(case_ids) != len(set(case_ids)):
+        raise ValueError("Evaluation case ids must be unique")
+    return cases
 
 
-def save_eval_template(path: str) -> None:
-    """创建一行人工标注 JSONL 模板。"""
+def save_evaluation_cases(path: str | Path, cases: list[EvaluationCase]) -> None:
+    """以稳定 JSONL 格式保存评估案例。"""
     destination = Path(path)
-    sample = {
-        "question": config.TEMPLATE_QUESTION,
-        "gold_sources": [
-            {"source_contains": config.TEMPLATE_SOURCE, "page": config.TEMPLATE_PAGE}
-        ],
-    }
-    destination.write_text(json.dumps(sample, ensure_ascii=False) + "\n", encoding="utf-8")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(case.to_dict(), ensure_ascii=False, sort_keys=True) for case in cases]
+    destination.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")

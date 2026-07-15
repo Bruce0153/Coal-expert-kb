@@ -79,7 +79,11 @@ class Answerer:
             )
 
         user_question = plan.query.raw or plan.query.normalized
-        prompt = build_answer_prompt(user_question, context_package.markdown)
+        prompt = build_answer_prompt(
+            user_question,
+            context_package.markdown,
+            query_type=plan.complex.query_type,
+        )
         try:
             response = self._llm.invoke(prompt)
             content = getattr(response, "content", None)

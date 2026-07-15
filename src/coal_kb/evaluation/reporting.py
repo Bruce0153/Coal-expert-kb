@@ -46,12 +46,13 @@ class EvaluationReportWriter:
     @staticmethod
     def _summary(metrics: dict[str, Any], results: list[CaseEvaluationResult], failures: list[CaseEvaluationResult]) -> str:
         lines = ["# Evaluation Summary", "", f"- Cases: {len(results)}", f"- Failures: {len(failures)}", ""]
-        for group_name in ("retrieval", "answer"):
+        for group_name in ("retrieval", "complex", "answer"):
             values = metrics.get(group_name) or {}
             lines.append(f"## {group_name.title()}")
             lines.append("")
             for key, value in sorted(values.items()):
-                lines.append(f"- `{key}`: {value:.4f}")
+                if isinstance(value, (int, float)):
+                    lines.append(f"- `{key}`: {value:.4f}")
             lines.append("")
         lines.extend(["## Failure Categories", ""])
         categories: dict[str, int] = {}

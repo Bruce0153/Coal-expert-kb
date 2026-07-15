@@ -7,8 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coal_kb.application.ask import build_runtime
-from coal_kb.evaluation import AnswerObservation, ClaimObservation, EvaluationCase, EvaluationPipeline, EvidenceReference
-from coal_kb.evaluation import config
+from coal_kb.evaluation import (
+    AnswerObservation,
+    ClaimObservation,
+    EvaluationCase,
+    EvaluationPipeline,
+    EvidenceReference,
+    config,
+)
 from coal_kb.infra.config import AppConfig, load_config
 
 
@@ -25,7 +31,9 @@ class Evaluate:
     def _retrieve(self, case: EvaluationCase, k: int):
         runtime = self._runtime
         plan = runtime.planner.build_plan(case.query, self.cfg, enable_llm=False, llm_config=None)
-        return runtime.retriever.execute(plan, trace={})[:k]
+        trace = {}
+        documents = runtime.complex_question_service.process(plan, trace=trace)[:k]
+        return documents, trace
 
     def _answer(self, case: EvaluationCase, documents) -> AnswerObservation:
         runtime = self._runtime

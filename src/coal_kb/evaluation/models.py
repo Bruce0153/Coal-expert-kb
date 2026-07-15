@@ -1,4 +1,4 @@
-"""定义评估数据、运行观察和结果模型。"""
+"""定义复杂科学问答评估数据、运行观察和结果模型。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ class QueryType(StrEnum):
     CONDITION = "condition"
     COMPARISON = "comparison"
     MULTI_HOP = "multi_hop"
-    GLOBAL = "global"
+    AGGREGATION = "aggregation"
+    TABLE = "table"
+    CROSS_DOCUMENT = "cross_document"
     UNANSWERABLE = "unanswerable"
 
 
@@ -43,7 +45,7 @@ class EvidenceReference:
 
 @dataclass(frozen=True)
 class EvaluationCase:
-    """表示一条版本化评估样本。"""
+    """表示一条版本化复杂科学问答评估样本。"""
 
     case_id: str
     query: str
@@ -51,6 +53,10 @@ class EvaluationCase:
     expected_answer: str | None = None
     expected_evidence: tuple[EvidenceReference, ...] = ()
     expected_filters: dict[str, Any] = field(default_factory=dict)
+    expected_subqueries: tuple[str, ...] = ()
+    expected_operation: str | None = None
+    expected_min_sources: int = 1
+    expected_table_ids: tuple[str, ...] = ()
     answerable: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -61,14 +67,20 @@ class EvaluationCase:
         query = str(value.get("query") or value.get("question") or "").strip()
         if not query:
             raise ValueError(f"Evaluation case {case_id} has an empty query")
-        query_type = QueryType(str(value.get("query_type") or QueryType.FACT.value))
+        raw_type = str(value.get("query_type") or QueryType.FACT.value)
+        if raw_type == "global":
+            raw_type = QueryType.CROSS_DOCUMENT.value
         return cls(
             case_id=case_id,
             query=query,
-            query_type=query_type,
+            query_type=QueryType(raw_type),
             expected_answer=value.get("expected_answer"),
             expected_evidence=tuple(EvidenceReference.from_dict(item) for item in evidence_values),
             expected_filters=dict(value.get("expected_filters") or {}),
+            expected_subqueries=tuple(str(item) for item in value.get("expected_subqueries") or ()),
+            expected_operation=value.get("expected_operation"),
+            expected_min_sources=max(1, int(value.get("expected_min_sources", 1))),
+            expected_table_ids=tuple(str(item) for item in value.get("expected_table_ids") or ()),
             answerable=bool(value.get("answerable", True)),
             metadata=dict(value.get("metadata") or {}),
         )
@@ -78,6 +90,8 @@ class EvaluationCase:
         payload["id"] = payload.pop("case_id")
         payload["query_type"] = self.query_type.value
         payload["expected_evidence"] = list(payload["expected_evidence"])
+        payload["expected_subqueries"] = list(payload["expected_subqueries"])
+        payload["expected_table_ids"] = list(payload["expected_table_ids"])
         return payload
 
 
@@ -93,10 +107,11 @@ class RetrievedEvidence:
     chunk_id: str | None
     text: str
     score: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_document(cls, document: Any, *, rank: int) -> RetrievedEvidence:
-        metadata = document.metadata or {}
+        metadata = dict(document.metadata or {})
         return cls(
             rank=rank,
             source_file=metadata.get("source_file"),
@@ -106,6 +121,7 @@ class RetrievedEvidence:
             chunk_id=metadata.get("chunk_id"),
             text=document.page_content or "",
             score=metadata.get("score") or metadata.get("retrieval_score"),
+            metadata=metadata,
         )
 
 
@@ -147,6 +163,7 @@ class CaseEvaluationResult:
     query_type: str
     retrieval_metrics: dict[str, float]
     answer_metrics: dict[str, float]
+    complex_metrics: dict[str, float]
     failure_category: str
     latency_ms: float
     retrieved: tuple[RetrievedEvidence, ...]

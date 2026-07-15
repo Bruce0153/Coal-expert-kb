@@ -105,6 +105,23 @@ class RetrievalConfig(BaseModel):
 
 
 
+class ComplexQAConfig(BaseModel):
+    """定义 Milestone C 路由、数据源和上下文预算。"""
+
+    enabled: bool = True
+    max_subqueries: int = 4
+    max_multi_hop_steps: int = 3
+    comparison_k_per_side: int = 4
+    cross_document_min_sources: int = 2
+    cross_document_max_per_source: int = 2
+    aggregation_record_limit: int = 500
+    aggregation_evidence_limit: int = 12
+    table_records_path: str = "data/interim/table_records.jsonl"
+    table_top_k: int = 5
+    base_context_tokens: int = 2400
+    base_evidence_chunks: int = 10
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -175,6 +192,7 @@ class AppConfig(BaseModel):
     pdf_markdown: PDFMarkdownConfig = Field(default_factory=PDFMarkdownConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    complex_qa: ComplexQAConfig = Field(default_factory=ComplexQAConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     backend: str = "elastic"

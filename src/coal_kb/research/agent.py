@@ -26,7 +26,7 @@ class ControlledAgentRoute:
     """规划、验证并在固定工具和预算内执行研究路线。"""
 
     max_steps: int = 3
-    max_duration_ms: float = 5000.0
+    max_duration_ms: float = 60000.0
     allowed_actions: tuple[AgentAction, ...] = (
         AgentAction.RETRIEVE,
         AgentAction.GRAPH,

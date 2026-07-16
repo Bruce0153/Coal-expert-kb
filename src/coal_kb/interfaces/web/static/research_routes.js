@@ -70,7 +70,8 @@
       summary.appendChild(chip);
     }
     const labelText = ROUTES.find(([value]) => value === activeRoute)?.[1] || activeRoute;
-    chip.textContent = `路线: ${labelText.split("：")[0]}`;
+    const nextText = `路线: ${labelText.split("：")[0]}`;
+    if (chip.textContent !== nextText) chip.textContent = nextText;
   }
 
   const summary = document.getElementById("settings-summary");

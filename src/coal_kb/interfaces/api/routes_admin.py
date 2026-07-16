@@ -1,14 +1,14 @@
-"""定义知识库管理 HTTP 路由。"""
+"""定义知识库管理、增量入库和任务状态 HTTP 路由。"""
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from coal_kb.application.admin import AdminService
-from coal_kb.infra.config import AppConfig
+from coal_kb.application.runtime_config import RuntimeConfigStore
 
 
 class DocumentInfo(BaseModel):
@@ -30,15 +30,22 @@ class KBStats(BaseModel):
     embedding_model: str = ""
 
 
-class IngestResult(BaseModel):
+class ImportTaskResponse(BaseModel):
+    task_id: str
     status: str
+    stage: str
     message: str
+    progress: int = Field(ge=0, le=100)
+    saved: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
     stats: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
 
 
-def build_admin_router(cfg: AppConfig) -> APIRouter:
+def build_admin_router(configs: RuntimeConfigStore) -> APIRouter:
     router = APIRouter(prefix="/api/admin", tags=["admin"])
-    service = AdminService(cfg)
+    service = AdminService(configs)
 
     @router.get("/stats", response_model=KBStats)
     def get_stats() -> KBStats:
@@ -48,22 +55,28 @@ def build_admin_router(cfg: AppConfig) -> APIRouter:
     def list_documents() -> list[DocumentInfo]:
         return [DocumentInfo.model_validate(item) for item in service.list_documents()]
 
-    @router.post("/documents/upload")
-    async def upload_documents(files: Annotated[list[UploadFile], File()]) -> dict[str, Any]:
-        saved: list[str] = []
-        errors: list[str] = []
+    @router.post("/documents/upload", response_model=ImportTaskResponse)
+    async def upload_documents(
+        files: Annotated[list[UploadFile], File()],
+        auto_ingest: bool = True,
+    ) -> ImportTaskResponse:
+        buffered: list[tuple[str, bytes]] = []
         for upload in files:
-            if not upload.filename:
-                continue
-            try:
-                saved.append(service.save_uploaded_document(upload.filename, await upload.read()))
-            except Exception as exc:
-                errors.append(f"{upload.filename}: {exc}")
-        return {
-            "saved": saved,
-            "errors": errors,
-            "message": f"成功上传 {len(saved)} 个文件" + (f"，{len(errors)} 个失败" if errors else ""),
-        }
+            if upload.filename:
+                buffered.append((upload.filename, await upload.read()))
+        if not buffered:
+            raise HTTPException(status_code=400, detail="至少需要选择一个文件。")
+        return ImportTaskResponse.model_validate(
+            service.start_import(buffered, auto_ingest=auto_ingest)
+        )
+
+    @router.get("/tasks/{task_id}", response_model=ImportTaskResponse)
+    def get_task(task_id: str) -> ImportTaskResponse:
+        try:
+            task = service.get_task(task_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="任务不存在。") from exc
+        return ImportTaskResponse.model_validate(task)
 
     @router.delete("/documents/{document_id}")
     def delete_document(document_id: str) -> dict[str, Any]:
@@ -71,8 +84,10 @@ def build_admin_router(cfg: AppConfig) -> APIRouter:
             raise HTTPException(status_code=404, detail="文档不存在。")
         return {"deleted": True, "document_id": document_id}
 
-    @router.post("/ingest", response_model=IngestResult)
-    def run_ingestion(rebuild: bool = False, force: bool = False) -> IngestResult:
-        return IngestResult.model_validate(service.run_ingestion(rebuild=rebuild, force=force))
+    @router.post("/ingest", response_model=ImportTaskResponse)
+    def run_ingestion(rebuild: bool = False, force: bool = False) -> ImportTaskResponse:
+        return ImportTaskResponse.model_validate(
+            service.start_ingestion(rebuild=rebuild, force=force)
+        )
 
     return router

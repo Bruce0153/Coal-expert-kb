@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException
 
 from coal_kb.application.ask import build_runtime
 from coal_kb.application.chat import ChatOrchestrator
+from coal_kb.application.runtime_config import RuntimeConfigStore
 from coal_kb.conversation.service import ConversationService
-from coal_kb.infra.config import AppConfig
 from coal_kb.interfaces.api.models import (
     ChatRequest,
     ChatResponse,
@@ -16,7 +16,10 @@ from coal_kb.interfaces.api.models import (
 from coal_kb.interfaces.api.runtime_overrides import apply_runtime_overrides
 
 
-def build_chat_router(cfg: AppConfig, conversations: ConversationService) -> APIRouter:
+def build_chat_router(
+    configs: RuntimeConfigStore,
+    conversations: ConversationService,
+) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["chat"])
 
     @router.post("/conversations", response_model=ConversationSummaryResponse)
@@ -47,7 +50,7 @@ def build_chat_router(cfg: AppConfig, conversations: ConversationService) -> API
 
     @router.post("/chat", response_model=ChatResponse)
     def chat(payload: ChatRequest) -> ChatResponse:
-        runtime_cfg = apply_runtime_overrides(cfg, payload)
+        runtime_cfg = apply_runtime_overrides(configs.snapshot(), payload)
         runtime = build_runtime(
             runtime_cfg,
             backend=payload.backend,

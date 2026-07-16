@@ -1,5 +1,5 @@
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 
 from coal_kb.application.runtime_config import RuntimeConfigStore
 from coal_kb.infra.config import AppConfig

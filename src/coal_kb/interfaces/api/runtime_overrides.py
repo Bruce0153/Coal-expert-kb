@@ -6,7 +6,7 @@ from typing import Any
 
 from coal_kb.infra.config import AppConfig
 from coal_kb.interfaces.api.models import RuntimeSettingsRequest, SettingsDefaultsResponse
-
+from coal_kb.research import ResearchRoute
 
 REMOTE_PROVIDERS = [
     "openai",
@@ -101,7 +101,7 @@ def _capability_defaults(config: Any) -> dict[str, Any]:
 
 
 def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
-    """向 UI 返回四项能力的当前配置和可选 Provider。"""
+    """向 UI 返回四项能力和研究路线选项。"""
     return SettingsDefaultsResponse(
         api_base_url="",
         tokenizer=_capability_defaults(cfg.tokenizer),
@@ -114,8 +114,10 @@ def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
         rerank=cfg.retrieval.rerank_enabled,
         llm=True,
         debug=False,
+        research_route=ResearchRoute.STANDARD.value,
         backend_options=["elastic", "chroma", "both"],
         mode_options=["strict", "balanced", "broad"],
+        research_route_options=[route.value for route in ResearchRoute],
         provider_options={
             capability: {"remote": REMOTE_PROVIDERS, "local": providers}
             for capability, providers in LOCAL_PROVIDERS.items()
@@ -123,6 +125,6 @@ def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
         notes=[
             "设置会立即应用于后续问答和增量入库，但不会把 API Key 写入磁盘。",
             "Embedding 模型必须与现有索引向量空间一致；切换模型后应重建索引。",
-            "本地 Provider 只使用本地模型或本地兼容服务，不会回退到远程 API。",
+            "Agent 路线只执行固定白名单动作并受最大步数约束。",
         ],
     )

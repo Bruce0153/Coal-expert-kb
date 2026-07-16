@@ -3,6 +3,15 @@
 from coal_kb.research.agent import AgentAction, ControlledAgentRoute
 from coal_kb.research.experiments import ResearchExperiment
 from coal_kb.research.graph import GraphRoute
+from coal_kb.research.graph_extraction import ExtractedEntity, KnowledgeGraphExtractor
+from coal_kb.research.graph_schema import (
+    GRAPH_SCHEMA_VERSION,
+    GraphNode,
+    GraphNodeType,
+    GraphRelation,
+    GraphRelationType,
+    KnowledgeGraph,
+)
 from coal_kb.research.models import ExperimentSpec, ResearchRoute, RouteResult
 from coal_kb.research.multimodal import MultimodalRoute
 from coal_kb.research.service import ResearchRouteService
@@ -21,7 +30,15 @@ __all__ = [
     "ExperimentSpec",
     "ExperimentSuiteConfig",
     "ExperimentVariant",
+    "ExtractedEntity",
+    "GRAPH_SCHEMA_VERSION",
+    "GraphNode",
+    "GraphNodeType",
+    "GraphRelation",
+    "GraphRelationType",
     "GraphRoute",
+    "KnowledgeGraph",
+    "KnowledgeGraphExtractor",
     "MultimodalRoute",
     "ResearchExperiment",
     "ResearchRoute",

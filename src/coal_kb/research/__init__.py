@@ -22,10 +22,23 @@ from coal_kb.research.suites import (
     SuiteRun,
     apply_route_parameters,
 )
+from coal_kb.research.visual_assets import (
+    ASSET_MANIFEST_VERSION,
+    VISUAL_INDEX_VERSION,
+    AssetManifest,
+    AssetType,
+    MultimodalAsset,
+    MultimodalAssetExtractor,
+    VisualAssetIndex,
+    VisualSearchResult,
+)
 
 __all__ = [
+    "ASSET_MANIFEST_VERSION",
     "AblationSuiteRunner",
     "AgentAction",
+    "AssetManifest",
+    "AssetType",
     "ControlledAgentRoute",
     "ExperimentSpec",
     "ExperimentSuiteConfig",
@@ -39,11 +52,16 @@ __all__ = [
     "GraphRoute",
     "KnowledgeGraph",
     "KnowledgeGraphExtractor",
+    "MultimodalAsset",
+    "MultimodalAssetExtractor",
     "MultimodalRoute",
     "ResearchExperiment",
     "ResearchRoute",
     "ResearchRouteService",
     "RouteResult",
     "SuiteRun",
+    "VISUAL_INDEX_VERSION",
+    "VisualAssetIndex",
+    "VisualSearchResult",
     "apply_route_parameters",
 ]

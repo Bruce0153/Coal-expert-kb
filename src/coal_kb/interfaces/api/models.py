@@ -1,4 +1,4 @@
-"""定义 HTTP 请求与响应协议，字段保持向后兼容。"""
+"""定义 HTTP 请求与响应协议。"""
 
 from __future__ import annotations
 
@@ -134,6 +134,5 @@ class SettingsDefaultsResponse(BaseModel):
     debug: bool = False
     backend_options: List[str] = Field(default_factory=list)
     mode_options: List[str] = Field(default_factory=list)
-    remote_provider_options: List[str] = Field(default_factory=list)
-    local_provider_options: Dict[str, List[str]] = Field(default_factory=dict)
+    provider_options: Dict[str, Dict[str, List[str]]] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)

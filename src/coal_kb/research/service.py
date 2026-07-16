@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.documents import Document
@@ -19,9 +19,9 @@ class ResearchRouteService:
     """复用标准复杂问答服务并提供统一研究路线入口。"""
 
     standard_service: Any
-    graph_route: GraphRoute
-    multimodal_route: MultimodalRoute
-    agent_route: ControlledAgentRoute
+    graph_route: GraphRoute = field(default_factory=GraphRoute)
+    multimodal_route: MultimodalRoute = field(default_factory=MultimodalRoute)
+    agent_route: ControlledAgentRoute = field(default_factory=ControlledAgentRoute)
 
     def process(
         self,

@@ -15,7 +15,10 @@ class RuntimeSettingsRequest(BaseModel):
     mode: Optional[str] = Field(default=None, pattern="^(strict|balanced|broad)?$")
     k: Optional[int] = Field(default=None, ge=1, le=50)
     rerank: bool = True
-    research_route: str = Field(default="standard", pattern="^(standard|graph)$")
+    research_route: str = Field(
+        default="standard",
+        pattern="^(standard|graph|multimodal|agent)$",
+    )
     tokenizer_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
     tokenizer_provider: Optional[str] = None
     tokenizer_base_url: Optional[str] = None
@@ -133,7 +136,9 @@ class SettingsDefaultsResponse(BaseModel):
     rerank: bool
     llm: bool = False
     debug: bool = False
+    research_route: str = "standard"
     backend_options: List[str] = Field(default_factory=list)
     mode_options: List[str] = Field(default_factory=list)
+    research_route_options: List[str] = Field(default_factory=list)
     provider_options: Dict[str, Dict[str, List[str]]] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)

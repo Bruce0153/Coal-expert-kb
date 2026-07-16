@@ -11,10 +11,12 @@ from langchain_core.documents import Document
 
 
 class ResearchRoute(str, Enum):
-    """Milestone D 当前可执行的研究路线。"""
+    """Milestone D 可执行的研究路线。"""
 
     STANDARD = "standard"
     GRAPH = "graph"
+    MULTIMODAL = "multimodal"
+    AGENT = "agent"
 
 
 @dataclass(frozen=True)

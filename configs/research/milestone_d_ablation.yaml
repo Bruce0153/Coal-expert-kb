@@ -1,0 +1,33 @@
+version: research-suite.v1
+name: milestone-d-ablation
+dataset: ../../data/eval/evaluation_sample.jsonl
+output_dir: ../../data/artifacts/milestone_d_ablation
+k_values: [1, 3, 5, 10]
+repeats: 1
+seed: 2026
+resume: true
+fail_fast: false
+metadata:
+  purpose: Compare the standard and research routes with controlled route parameters.
+variants:
+  - name: standard
+    route: standard
+  - name: graph-default
+    route: graph
+  - name: graph-small
+    route: graph
+    parameters:
+      graph.seed_count: 2
+      graph.max_edges: 40
+  - name: multimodal-default
+    route: multimodal
+  - name: multimodal-no-secondary-boost
+    route: multimodal
+    parameters:
+      multimodal.secondary_boost: 0.0
+  - name: agent-default
+    route: agent
+  - name: agent-two-step
+    route: agent
+    parameters:
+      agent.max_steps: 2

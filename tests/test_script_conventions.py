@@ -15,6 +15,7 @@ SCRIPT_CLASSES = {
     "extract_records.py": "ExtractRecords",
     "index.py": "Index",
     "ingest.py": "Ingest",
+    "run_research_experiment.py": "RunResearchExperiment",
     "serve.py": "Serve",
     "train_lora_record_extractor.py": "TrainLoraRecordExtractor",
     "validate_complex_dataset.py": "ValidateComplexDataset",
@@ -38,9 +39,7 @@ def test_scripts_use_single_line_docstring_and_run_comment() -> None:
             and isinstance(first.value.value, str)
         ), name
         assert "\n" not in first.value.value, name
-        last_line = next(
-            line for line in reversed(text.splitlines()) if line.strip()
-        )
+        last_line = next(line for line in reversed(text.splitlines()) if line.strip())
         assert last_line.startswith("# 运行命令："), name
 
 

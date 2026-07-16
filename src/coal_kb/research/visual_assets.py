@@ -64,14 +64,13 @@ class MultimodalAsset:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> MultimodalAsset:
-        bbox = payload.get("bbox")
         return cls(
             asset_id=str(payload["asset_id"]),
             asset_type=AssetType(str(payload["asset_type"])),
             source_file=str(payload["source_file"]),
             asset_path=str(payload["asset_path"]),
             page=int(payload["page"]) if payload.get("page") is not None else None,
-            bbox=tuple(float(value) for value in bbox) if bbox is not None else None,
+            bbox=_coerce_bbox(payload.get("bbox")),
             caption=str(payload.get("caption") or ""),
             extracted_text=str(payload.get("extracted_text") or ""),
             mime_type=str(payload.get("mime_type") or "application/octet-stream"),
@@ -133,12 +132,21 @@ class AssetManifest:
         assets: list[MultimodalAsset] = []
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
-                if line.strip():
-                    payload = json.loads(line)
-                    if not isinstance(payload, dict):
-                        raise ValueError("Each asset manifest line must be a JSON object")
-                    assets.append(MultimodalAsset.from_dict(payload))
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    raise ValueError("Each asset manifest line must be a JSON object")
+                assets.append(MultimodalAsset.from_dict(payload))
         return cls(assets=assets)
+
+
+def _coerce_bbox(value: Any) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 4:
+        raise ValueError("Asset bbox must contain four numeric values")
+    return (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
 
 
 def _checksum(content: bytes) -> str:
@@ -152,8 +160,7 @@ def _asset_id(source: str, page: int | None, kind: str, checksum: str, occurrenc
 
 def _mime_for_extension(extension: str) -> str:
     extension = extension.lower().lstrip(".")
-    aliases = {"jpg": "jpeg", "tif": "tiff"}
-    normalized = aliases.get(extension, extension)
+    normalized = {"jpg": "jpeg", "tif": "tiff"}.get(extension, extension)
     return f"image/{normalized}" if normalized else "application/octet-stream"
 
 
@@ -167,10 +174,9 @@ class MultimodalAssetExtractor:
     def process(self, inputs: Iterable[Path]) -> AssetManifest:
         assets: list[MultimodalAsset] = []
         for path in self._expand_inputs(inputs):
-            suffix = path.suffix.lower()
-            if suffix == ".pdf":
+            if path.suffix.lower() == ".pdf":
                 assets.extend(self._extract_pdf(path))
-            elif suffix in _SUPPORTED_IMAGES:
+            elif path.suffix.lower() in _SUPPORTED_IMAGES:
                 assets.append(self._extract_image_file(path))
         manifest = AssetManifest(assets=sorted(assets, key=lambda item: item.asset_id))
         manifest.write(self.output_dir)
@@ -225,11 +231,15 @@ class MultimodalAssetExtractor:
                     checksum = _checksum(content)
                     rects = page.get_image_rects(xref)
                     rect = rects[0] if rects else None
+                    bbox = (
+                        (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+                        if rect is not None
+                        else None
+                    )
                     asset_id = _asset_id(str(path), page_index + 1, "image", checksum, occurrence)
                     destination = self.output_dir / "assets" / f"{asset_id}.{extension}"
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(content)
-                    bbox = tuple(float(value) for value in rect) if rect is not None else None
                     assets.append(
                         MultimodalAsset(
                             asset_id=asset_id,
@@ -261,11 +271,13 @@ class MultimodalAssetExtractor:
             text = "\n".join(" | ".join(str(cell or "") for cell in row) for row in rows)
             content = json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8")
             checksum = _checksum(content)
+            bbox = _coerce_bbox(table.bbox)
+            if bbox is None:
+                continue
             asset_id = _asset_id(str(source_path), page_number, "table", checksum, occurrence)
             destination = self.output_dir / "assets" / f"{asset_id}.json"
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
-            bbox = tuple(float(value) for value in table.bbox)
             assets.append(
                 MultimodalAsset(
                     asset_id=asset_id,
@@ -296,20 +308,18 @@ class MultimodalAssetExtractor:
                 distance = float(block[1])
             else:
                 x0, y0, x1, _ = (float(block[index]) for index in range(4))
-                horizontal_overlap = max(0.0, min(x1, bbox[2]) - max(x0, bbox[0]))
-                if horizontal_overlap <= 0 or y0 < bbox[1] - 20 or y0 > bbox[3] + 180:
+                overlap = max(0.0, min(x1, bbox[2]) - max(x0, bbox[0]))
+                if overlap <= 0 or y0 < bbox[1] - 20 or y0 > bbox[3] + 180:
                     continue
                 distance = abs(y0 - bbox[3])
-            priority = 0 if _CAPTION_RE.search(text) else 1
-            candidates.append((priority, distance, text))
+            candidates.append((0 if _CAPTION_RE.search(text) else 1, distance, text))
         return min(candidates, default=(1, 0.0, ""))[2]
 
 
 def _tokens(text: str) -> list[str]:
     lowered = text.casefold()
     tokens = re.findall(r"[a-z0-9][a-z0-9_-]{1,}", lowered)
-    chinese = re.findall(r"[\u4e00-\u9fff]+", lowered)
-    for segment in chinese:
+    for segment in re.findall(r"[\u4e00-\u9fff]+", lowered):
         tokens.extend(segment[index : index + 2] for index in range(max(1, len(segment) - 1)))
     return tokens
 
@@ -358,7 +368,9 @@ class VisualAssetIndex:
         dimension: int = 256,
     ) -> VisualAssetIndex:
         items = list(assets)
-        vectors = embedding_fn(items) if embedding_fn is not None else [_lexical_vector(item.search_text, dimension) for item in items]
+        vectors = embedding_fn(items) if embedding_fn is not None else [
+            _lexical_vector(item.search_text, dimension) for item in items
+        ]
         if len(vectors) != len(items):
             raise ValueError("Visual embedding function must return one vector per asset")
         active_dimension = len(vectors[0]) if vectors else dimension
@@ -383,15 +395,21 @@ class VisualAssetIndex:
             ],
         }
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(path)
 
     @classmethod
     def load(cls, path: Path) -> VisualAssetIndex:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("index_version") != VISUAL_INDEX_VERSION:
-            raise ValueError(f"Unsupported visual index version: {payload.get('index_version')}")
+        if not isinstance(payload, dict) or payload.get("index_version") != VISUAL_INDEX_VERSION:
+            version = payload.get("index_version") if isinstance(payload, dict) else None
+            raise ValueError(f"Unsupported visual index version: {version}")
         entries = payload.get("entries") or []
+        if not isinstance(entries, list):
+            raise ValueError("Visual index entries must be a list")
         return cls(
             assets=[MultimodalAsset.from_dict(entry["asset"]) for entry in entries],
             vectors=[[float(value) for value in entry["vector"]] for entry in entries],

@@ -1,3 +1,6 @@
+from pydantic import ValidationError
+import pytest
+
 from coal_kb.application.runtime_config import RuntimeConfigStore
 from coal_kb.infra.config import AppConfig
 from coal_kb.interfaces.api.models import ChatRequest
@@ -15,6 +18,7 @@ def test_apply_runtime_overrides_updates_each_capability() -> None:
         backend="chroma",
         mode="broad",
         k=9,
+        research_route="agent",
         tokenizer_mode="remote",
         tokenizer_provider="openai_compatible",
         tokenizer_base_url="https://tokenizer.example/v1",
@@ -37,6 +41,7 @@ def test_apply_runtime_overrides_updates_each_capability() -> None:
 
     runtime_cfg = apply_runtime_overrides(cfg, payload)
 
+    assert payload.research_route == "agent"
     assert runtime_cfg.backend == "chroma"
     assert runtime_cfg.retrieval.mode == "broad"
     assert runtime_cfg.retrieval.k == 9
@@ -57,11 +62,18 @@ def test_runtime_config_store_returns_isolated_snapshots() -> None:
     assert store.reset().backend == AppConfig().backend
 
 
-def test_build_settings_defaults_exposes_provider_options_without_keys() -> None:
+def test_build_settings_defaults_exposes_provider_and_route_options_without_keys() -> None:
     cfg = AppConfig()
     payload = build_settings_defaults(cfg)
     assert payload.backend == cfg.backend
     assert "elastic" in payload.backend_options
+    assert payload.research_route == "standard"
+    assert payload.research_route_options == ["standard", "graph", "multimodal", "agent"]
     assert "dashscope" in payload.provider_options["llm"]["remote"]
     assert "cross_encoder" in payload.provider_options["rerank"]["local"]
     assert "api_key" not in payload.llm_config["remote"]
+
+
+def test_runtime_request_rejects_arbitrary_agent_route() -> None:
+    with pytest.raises(ValidationError):
+        ChatRequest(message="hello", research_route="shell")

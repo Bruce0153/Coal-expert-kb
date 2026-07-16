@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
   </head>
   <body>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
@@ -20,7 +21,7 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <div id="backend-pill" class="status-pill">检查连接中…</div>
+          <div id="backend-pill" class="status-pill" aria-live="polite">检查连接中…</div>
           <button id="manage-toggle" class="ghost-button" type="button">知识库管理</button>
           <button id="new-chat-top" class="ghost-button" type="button">新对话</button>
           <button id="settings-toggle" class="ghost-button" type="button">设置</button>
@@ -35,14 +36,18 @@
           </div>
           <div id="settings-summary" class="settings-summary"></div>
           <section class="sidebar-section">
-            <div class="section-label-row"><span class="section-label">历史会话</span><button id="refresh-conversations" class="text-button" type="button">刷新</button></div>
-            <div id="conversation-empty" class="empty-card">暂无对话记录。</div>
+            <div class="section-label-row">
+              <span class="section-label">历史会话</span>
+              <button id="refresh-conversations" class="text-button" type="button">刷新</button>
+            </div>
+            <div id="conversation-status" class="inline-status" aria-live="polite"></div>
+            <div id="conversation-empty" class="empty-card">暂无对话记录，发送问题后会自动创建。</div>
             <div id="conversation-list" class="conversation-list"></div>
           </section>
         </aside>
 
         <section class="chat-stage">
-          <div id="thread-status" class="thread-status">正在初始化。</div>
+          <div id="thread-status" class="thread-status" aria-live="polite">正在初始化。</div>
           <section id="welcome-panel" class="welcome-panel panel">
             <div class="welcome-copy">
               <p class="eyebrow">欢迎使用</p>
@@ -52,16 +57,17 @@
             <div class="sample-prompts">
               <button id="sample-question" class="sample-chip" type="button">蒸汽气化在1200K附近如何影响NH3和HCN的生成？</button>
               <button class="sample-chip" type="button" data-sample="比较蒸汽气化与CO2气化对氮物种释放的影响。">蒸汽气化与 CO2 气化对比</button>
+              <button class="sample-chip" type="button" data-sample="结合图表比较不同压力下气化反应速率的变化。">图表证据综合</button>
             </div>
           </section>
           <section id="thread-panel" class="thread-panel panel">
             <div id="thread-empty" class="empty-card">发送第一条消息后，回答和引用将在此显示。</div>
             <div id="message-thread" class="message-thread"></div>
-            <div id="typing-indicator" class="typing-indicator hidden"><span></span><span></span><span></span><p>正在检索和生成回答…</p></div>
+            <div id="typing-indicator" class="typing-indicator hidden"><span></span><span></span><span></span><p>正在规划路线、检索证据并生成回答…</p></div>
           </section>
           <form id="chat-form" class="composer panel">
             <label class="composer-label" for="message-input">输入问题</label>
-            <textarea id="message-input" name="message" rows="3" placeholder="请输入科研问题…"></textarea>
+            <textarea id="message-input" name="message" rows="3" placeholder="请输入科研问题；Ctrl/⌘ + Enter 可发送。"></textarea>
             <div class="composer-toolbar">
               <div id="composer-note" class="composer-note">回答将基于检索证据生成。</div>
               <button id="send-button" class="primary-button" type="submit">发送</button>
@@ -85,25 +91,42 @@
     <div id="settings-modal" class="modal hidden" aria-hidden="true">
       <div id="settings-backdrop" class="modal-backdrop"></div>
       <div class="modal-card modal-card-wide">
-        <div class="modal-header"><div><p class="eyebrow">运行配置</p><h2>模型与 Provider 设置</h2><p class="modal-copy">保存后立即用于后续问答与增量入库；API Key 仅保存在服务进程和当前浏览器会话中。</p></div><button id="settings-close" class="ghost-button" type="button">关闭</button></div>
+        <div class="modal-header">
+          <div><p class="eyebrow">运行配置</p><h2>模型与 Provider 设置</h2><p class="modal-copy">保存后立即用于后续问答与增量入库；API Key 仅保存在服务进程和当前浏览器会话中。</p></div>
+          <button id="settings-close" class="ghost-button" type="button">关闭</button>
+        </div>
         <form id="settings-form" class="settings-form">
+          <div id="provider-effective-summary" class="configuration-banner" aria-live="polite"></div>
           <div class="settings-grid">
             <label class="field"><span>API 基础地址</span><input id="setting-api-base-url" type="text" placeholder="http://127.0.0.1:8000" /></label>
             <label class="field"><span>检索后端</span><select id="setting-backend"></select></label>
             <label class="field"><span>检索模式</span><select id="setting-mode"></select></label>
+            <label class="field"><span>研究路线</span><select id="setting-research-route"></select></label>
             <label class="field"><span>Top K</span><input id="setting-k" type="number" min="1" max="50" /></label>
             <label class="field inline-toggle"><input id="setting-rerank" type="checkbox" /><span>启用重排序</span></label>
             <label class="field inline-toggle"><input id="setting-llm" type="checkbox" /><span>启用 LLM 回答</span></label>
             <label class="field inline-toggle"><input id="setting-debug" type="checkbox" /><span>显示诊断信息</span></label>
           </div>
           <div id="provider-settings" class="provider-settings">
-            <section class="provider-card" data-capability="tokenizer"><h3>Tokenizer</h3><div class="provider-grid"><label class="field"><span>模式</span><select id="setting-tokenizer-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-tokenizer-provider"></select></label><label class="field"><span>地址</span><input id="setting-tokenizer-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-tokenizer-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-tokenizer-api-key" type="password" autocomplete="off" /></label></div></section>
-            <section class="provider-card" data-capability="embeddings"><h3>Embeddings</h3><div class="provider-grid"><label class="field"><span>模式</span><select id="setting-embedding-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-embedding-provider"></select></label><label class="field"><span>地址</span><input id="setting-embedding-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-embedding-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-embedding-api-key" type="password" autocomplete="off" /></label></div></section>
-            <section class="provider-card" data-capability="rerank"><h3>Rerank</h3><div class="provider-grid"><label class="field"><span>模式</span><select id="setting-rerank-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-rerank-provider"></select></label><label class="field"><span>地址</span><input id="setting-rerank-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-rerank-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-rerank-api-key" type="password" autocomplete="off" /></label></div></section>
-            <section class="provider-card" data-capability="llm"><h3>LLM</h3><div class="provider-grid"><label class="field"><span>模式</span><select id="setting-llm-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-llm-provider"></select></label><label class="field"><span>地址</span><input id="setting-llm-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-llm-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-llm-api-key" type="password" autocomplete="off" /></label></div></section>
+            <section class="provider-card" data-capability="tokenizer">
+              <div class="provider-card-header"><div><h3>Tokenizer</h3><p>上下文 Token 计数与预算控制</p></div><span id="provider-status-tokenizer" class="provider-status">待检查</span></div>
+              <div class="provider-grid"><label class="field"><span>模式</span><select id="setting-tokenizer-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-tokenizer-provider"></select></label><label class="field"><span>地址</span><input id="setting-tokenizer-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-tokenizer-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-tokenizer-api-key" type="password" autocomplete="off" /></label></div>
+            </section>
+            <section class="provider-card" data-capability="embeddings">
+              <div class="provider-card-header"><div><h3>Embeddings</h3><p>文档与问题向量化，必须匹配现有索引</p></div><span id="provider-status-embeddings" class="provider-status">待检查</span></div>
+              <div class="provider-grid"><label class="field"><span>模式</span><select id="setting-embedding-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-embedding-provider"></select></label><label class="field"><span>地址</span><input id="setting-embedding-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-embedding-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-embedding-api-key" type="password" autocomplete="off" /></label></div>
+            </section>
+            <section class="provider-card" data-capability="rerank">
+              <div class="provider-card-header"><div><h3>Rerank</h3><p>对候选证据正式重排序</p></div><span id="provider-status-rerank" class="provider-status">待检查</span></div>
+              <div class="provider-grid"><label class="field"><span>模式</span><select id="setting-rerank-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-rerank-provider"></select></label><label class="field"><span>地址</span><input id="setting-rerank-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-rerank-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-rerank-api-key" type="password" autocomplete="off" /></label></div>
+            </section>
+            <section class="provider-card" data-capability="llm">
+              <div class="provider-card-header"><div><h3>LLM</h3><p>基于证据生成最终回答</p></div><span id="provider-status-llm" class="provider-status">待检查</span></div>
+              <div class="provider-grid"><label class="field"><span>模式</span><select id="setting-llm-mode"><option value="local">本地</option><option value="remote">远程</option></select></label><label class="field"><span>Provider</span><select id="setting-llm-provider"></select></label><label class="field"><span>地址</span><input id="setting-llm-base-url" type="text" /></label><label class="field"><span>模型</span><input id="setting-llm-model" type="text" /></label><label class="field"><span>API Key</span><input id="setting-llm-api-key" type="password" autocomplete="off" /></label></div>
+            </section>
           </div>
           <div id="settings-notes" class="settings-notes"></div>
-          <div class="modal-actions"><button id="settings-reset" class="ghost-button" type="button">恢复默认</button><button class="primary-button" type="submit">保存并应用</button></div>
+          <div class="modal-actions"><button id="settings-reset" class="ghost-button" type="button">恢复默认</button><button id="settings-save" class="primary-button" type="submit">保存并应用</button></div>
         </form>
       </div>
     </div>
@@ -115,21 +138,21 @@
         <div class="manage-tabs"><button class="manage-tab active" data-tab="tab-upload">上传与入库</button><button class="manage-tab" data-tab="tab-docs">文档列表</button><button class="manage-tab" data-tab="tab-stats">统计</button><button class="manage-tab" data-tab="tab-ingest">手动摄入</button></div>
         <div id="tab-upload" class="manage-tab-panel">
           <div class="upload-dropzone" id="upload-dropzone"><p>拖拽文件到此处，或点击选择文件</p><p class="upload-hint">支持 PDF、TXT、MD、DOCX、PPTX、CSV、XLSX、HTML、JSON/JSONL</p><input type="file" id="file-input" multiple accept=".pdf,.txt,.md,.docx,.pptx,.csv,.xlsx,.html,.json,.jsonl" hidden /><button id="upload-btn" class="primary-button compact" type="button">选择文件</button></div>
+          <div id="upload-summary" class="upload-summary">尚未选择文件。</div>
           <div id="upload-file-list" class="upload-file-list hidden"></div>
           <label class="field inline-toggle upload-auto"><input id="upload-auto-ingest" type="checkbox" checked /><span>上传后立即增量写入当前知识库</span></label>
           <div class="upload-actions hidden" id="upload-actions"><button id="upload-clear" class="ghost-button" type="button">清空</button><button id="upload-start" class="primary-button" type="button">上传并处理</button></div>
-          <div id="upload-progress" class="task-progress hidden"><div class="task-progress-track"><div id="upload-progress-bar" class="task-progress-bar"></div></div><div id="upload-progress-label" class="task-progress-label"></div></div>
-          <div id="upload-status" class="upload-status"></div>
+          <div id="upload-progress" class="task-progress hidden" aria-live="polite"><div class="task-progress-track"><div id="upload-progress-bar" class="task-progress-bar"></div></div><div id="upload-progress-label" class="task-progress-label"></div></div>
+          <div id="upload-status" class="upload-status" aria-live="polite"></div>
         </div>
         <div id="tab-docs" class="manage-tab-panel hidden"><div class="manage-toolbar"><button id="refresh-docs" class="ghost-button compact" type="button">刷新列表</button><span id="doc-count" class="manage-hint"></span></div><div id="doc-list" class="doc-list"><div class="empty-card">点击刷新加载文档。</div></div></div>
         <div id="tab-stats" class="manage-tab-panel hidden"><div id="kb-stats" class="kb-stats"><div class="empty-card">切换到此页加载统计。</div></div></div>
-        <div id="tab-ingest" class="manage-tab-panel hidden"><div class="ingest-controls"><p class="ingest-desc">扫描上传目录并更新索引。普通增量更新不需要勾选重建。</p><div class="ingest-options"><label class="field inline-toggle"><input id="ingest-rebuild" type="checkbox" /><span>重建索引</span></label><label class="field inline-toggle"><input id="ingest-force" type="checkbox" /><span>忽略签名差异并继续</span></label></div><button id="ingest-start" class="primary-button" type="button">开始摄入</button></div><div id="ingest-status" class="ingest-status"></div></div>
+        <div id="tab-ingest" class="manage-tab-panel hidden"><div class="ingest-controls"><p class="ingest-desc">扫描上传目录并更新索引。普通增量更新不需要勾选重建。</p><div class="ingest-options"><label class="field inline-toggle"><input id="ingest-rebuild" type="checkbox" /><span>重建索引</span></label><label class="field inline-toggle"><input id="ingest-force" type="checkbox" /><span>忽略签名差异并继续</span></label></div><button id="ingest-start" class="primary-button" type="button">开始摄入</button></div><div id="ingest-status" class="ingest-status" aria-live="polite"></div></div>
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
     <script src="/static/app.js"></script>
-    <script src="/static/research_routes.js"></script>
   </body>
 </html>

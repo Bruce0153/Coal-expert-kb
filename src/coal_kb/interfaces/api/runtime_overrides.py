@@ -93,15 +93,30 @@ def apply_runtime_overrides(cfg: AppConfig, payload: RuntimeSettingsRequest) -> 
 
 
 def _capability_defaults(config: Any) -> dict[str, Any]:
+    remote = config.remote.model_dump(exclude={"api_key"})
+    remote["api_key_configured"] = bool(config.remote.api_key)
+    active = config.remote if config.mode == "remote" else config.local
+    missing: list[str] = []
+    if not str(getattr(active, "provider", "") or "").strip():
+        missing.append("provider")
+    if not str(getattr(active, "model", "") or "").strip():
+        missing.append("model")
+    if config.mode == "remote" and not config.remote.api_key:
+        missing.append("api_key")
     return {
         "mode": config.mode,
-        "remote": config.remote.model_dump(exclude={"api_key"}),
+        "remote": remote,
         "local": config.local.model_dump(),
+        "status": {
+            "configured": not missing,
+            "missing": missing,
+            "message": "配置完整" if not missing else f"缺少: {', '.join(missing)}",
+        },
     }
 
 
 def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
-    """向 UI 返回四项能力和研究路线选项。"""
+    """向 UI 返回四项能力、配置状态和研究路线选项。"""
     return SettingsDefaultsResponse(
         api_base_url="",
         tokenizer=_capability_defaults(cfg.tokenizer),
@@ -123,6 +138,7 @@ def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
             for capability, providers in LOCAL_PROVIDERS.items()
         },
         notes=[
+            "绿色状态表示配置完整，不代表已经发起网络连通测试。",
             "设置会立即应用于后续问答和增量入库，但不会把 API Key 写入磁盘。",
             "Embedding 模型必须与现有索引向量空间一致；切换模型后应重建索引。",
             "Agent 路线只执行固定白名单动作并受最大步数约束。",

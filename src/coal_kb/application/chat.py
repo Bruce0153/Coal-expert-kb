@@ -41,6 +41,7 @@ class ChatOrchestrator:
         query: str,
         conversation_id: str | None = None,
         enable_llm: bool = False,
+        research_route: str = "standard",
         save_trace: bool = False,
         debug: bool = False,
     ) -> ChatTurnResult:
@@ -49,11 +50,8 @@ class ChatOrchestrator:
             conversation_id,
             title_hint=query,
         )
-        prior_messages = self.conversations.list_messages(
-            conversation.conversation_id
-        )
+        prior_messages = self.conversations.list_messages(conversation.conversation_id)
         prepared_history = prepare_history_context(prior_messages, query)
-
         user_message = self.conversations.add_message(
             conversation_id=conversation.conversation_id,
             role="user",
@@ -61,21 +59,21 @@ class ChatOrchestrator:
             metadata={
                 "history_used": prepared_history.used_history,
                 "history_reason": prepared_history.reason,
+                "research_route": research_route,
             },
         )
-
         execution = execute_query(
             self.runtime,
             prepared_history.retrieval_query,
             enable_llm=enable_llm,
             original_query=query,
+            research_route=research_route,
             history_used=prepared_history.used_history,
             history_reason=prepared_history.reason,
         )
         log_query(self.runtime, execution, save_trace=save_trace or debug)
         response = build_response_payload(execution, include_debug=debug)
         response["conversation_id"] = conversation.conversation_id
-
         assistant_message = self.conversations.add_message(
             conversation_id=conversation.conversation_id,
             role="assistant",
@@ -92,6 +90,7 @@ class ChatOrchestrator:
                 "confidence_score": response["confidence_score"],
                 "diagnostics": response["diagnostics"],
                 "timings_ms": response["timings_ms"],
+                "research_route": research_route,
             },
         )
         response["message_id"] = assistant_message.message_id

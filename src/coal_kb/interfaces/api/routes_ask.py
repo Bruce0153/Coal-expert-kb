@@ -27,7 +27,12 @@ def build_ask_router(configs: RuntimeConfigStore) -> APIRouter:
             enable_llm=payload.llm,
             llm_provider=payload.llm_provider,
         )
-        execution = execute_query(runtime, query, enable_llm=payload.llm)
+        execution = execute_query(
+            runtime,
+            query,
+            enable_llm=payload.llm,
+            research_route=payload.research_route,
+        )
         log_query(runtime, execution, save_trace=payload.debug)
         response_payload = build_response_payload(execution, include_debug=payload.debug)
         return build_ask_response(response_payload)

@@ -66,6 +66,7 @@ def build_chat_router(
                 query=payload.message,
                 conversation_id=payload.conversation_id,
                 enable_llm=payload.llm,
+                research_route=payload.research_route,
                 save_trace=payload.debug,
                 debug=payload.debug,
             )

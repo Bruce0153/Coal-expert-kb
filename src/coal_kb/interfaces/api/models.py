@@ -15,6 +15,7 @@ class RuntimeSettingsRequest(BaseModel):
     mode: Optional[str] = Field(default=None, pattern="^(strict|balanced|broad)?$")
     k: Optional[int] = Field(default=None, ge=1, le=50)
     rerank: bool = True
+    research_route: str = Field(default="standard", pattern="^(standard|graph)$")
     tokenizer_mode: Optional[str] = Field(default=None, pattern="^(remote|local)?$")
     tokenizer_provider: Optional[str] = None
     tokenizer_base_url: Optional[str] = None

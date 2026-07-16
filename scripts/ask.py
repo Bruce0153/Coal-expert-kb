@@ -17,6 +17,7 @@ from coal_kb.application.ask import (
 from coal_kb.infra.config import AppConfig, load_config
 from coal_kb.infra.observability.logging import setup_logging
 from coal_kb.interfaces.cli import print_banner, print_kv, print_stats_table
+from coal_kb.research import ResearchRoute
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class Ask:
             self.cfg,
             backend=self.args.backend,
             k=self.args.k,
-            rerank_enabled=(False if self.args.no_rerank else None),
+            rerank_enabled=False if self.args.no_rerank else None,
             rerank_top_n=self.args.rerank_top_k,
             mode=self.args.mode,
             enable_llm=self.args.llm,
@@ -46,6 +47,7 @@ class Ask:
                 "rerank_top_n": runtime.retriever.rerank_top_n,
                 "max_per_source": self.cfg.retrieval.max_per_source,
                 "mode": runtime.mode,
+                "research_route": self.args.research_route,
             },
         )
         return runtime
@@ -71,7 +73,6 @@ class Ask:
         debug = self.args.debug
         print_banner("Coal KB Ask", f"backend={runtime.backend}")
         print("输入 help 查看命令，输入 exit 退出。")
-
         while True:
             question = input("\n你的问题> ").strip()
             if not question:
@@ -86,25 +87,18 @@ class Ask:
                 debug = not debug
                 print(f"debug={debug}")
                 continue
-
             try:
                 execution = execute_query(
                     runtime,
                     question,
                     enable_llm=self.args.llm,
+                    research_route=self.args.research_route,
                 )
                 if self.args.show_plan:
                     print("\nQueryPlan:")
                     print(execution.plan.to_json())
-                log_query(
-                    runtime,
-                    execution,
-                    save_trace=self.args.save_trace or debug,
-                )
-                payload = build_response_payload(
-                    execution,
-                    include_debug=debug,
-                )
+                log_query(runtime, execution, save_trace=self.args.save_trace or debug)
+                payload = build_response_payload(execution, include_debug=debug)
                 print_stats_table(
                     "Query Stats",
                     [
@@ -112,6 +106,7 @@ class Ask:
                         ("latency_ms", execution.timings_ms["total"]),
                         ("evidence", execution.result.evidence_sufficiency),
                         ("confidence", execution.result.confidence_score),
+                        ("research_route", execution.research_route),
                     ],
                 )
                 self._print_response(payload)
@@ -124,9 +119,7 @@ class Ask:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Ask the expert KB with metadata-aware retrieval."
-    )
+    parser = argparse.ArgumentParser(description="Ask the expert KB with metadata-aware retrieval.")
     parser.add_argument("--k", type=int, default=None)
     parser.add_argument("--llm", action="store_true", help="Enable LLM answer generation.")
     parser.add_argument("--show-plan", action="store_true", help="Print QueryPlan JSON.")
@@ -135,22 +128,18 @@ def main() -> None:
     parser.add_argument("--no-rerank", action="store_true", help="Disable configured reranking.")
     parser.add_argument("--rerank-top-k", type=int, default=None)
     parser.add_argument(
+        "--research-route",
+        choices=[route.value for route in ResearchRoute],
+        default=ResearchRoute.STANDARD.value,
+    )
+    parser.add_argument(
         "--llm-provider",
         default="none",
         choices=["none", "openai", "openai_compatible", "dashscope"],
     )
-    parser.add_argument(
-        "--backend",
-        default=None,
-        choices=["chroma", "elastic", "both"],
-    )
-    parser.add_argument(
-        "--mode",
-        default=None,
-        choices=["strict", "balanced", "broad"],
-    )
+    parser.add_argument("--backend", default=None, choices=["chroma", "elastic", "both"])
+    parser.add_argument("--mode", default=None, choices=["strict", "balanced", "broad"])
     args = parser.parse_args()
-
     cfg = load_config()
     setup_logging(cfg, logger_name=__name__)
     Ask(cfg=cfg, args=args).process()
@@ -159,4 +148,4 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-# 运行命令：PYTHONPATH=src python scripts/ask.py
+# 运行命令：PYTHONPATH=src python scripts/ask.py --research-route graph

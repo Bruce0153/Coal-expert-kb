@@ -1,4 +1,4 @@
-"""编排单轮问答运行时、检索执行和响应格式化。"""
+"""编排单轮问答运行时、研究路线、检索执行和响应格式化。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from coal_kb.infra.config import AppConfig
     from coal_kb.infra.persistence.registry import RegistrySQLite
     from coal_kb.infra.providers.llm import LLMConfig
+    from coal_kb.research import ResearchRouteService
     from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
 
@@ -33,6 +34,7 @@ class AskRuntime:
     retriever: ExpertRetriever
     context_builder: ContextBuilder
     complex_question_service: ComplexQuestionService
+    research_route_service: ResearchRouteService
     answerer: Answerer
     registry: RegistrySQLite
     llm_config: LLMConfig | None
@@ -48,6 +50,7 @@ class AskExecution:
     context_debug: dict[str, Any]
     result: AnswerResult
     timings_ms: dict[str, float]
+    research_route: str = "standard"
     history_used: bool = False
     history_reason: str = "standalone_query"
 
@@ -83,11 +86,7 @@ class _CombinedRetriever:
             return []
         from coal_kb.recall import rrf_fuse
 
-        return rrf_fuse(
-            elastic_documents,
-            chroma_documents,
-            k=self._rrf_k,
-        )[: self._k]
+        return rrf_fuse(elastic_documents, chroma_documents, k=self._rrf_k)[: self._k]
 
     @staticmethod
     def _invoke(retriever: Any, query: str) -> list[Document]:
@@ -98,12 +97,7 @@ class _CombinedRetriever:
         return list(retriever.get_relevant_documents(query))
 
 
-def _combine_factories(
-    chroma_factory: Any,
-    elastic_factory: Any,
-    *,
-    rrf_k: int,
-):
+def _combine_factories(chroma_factory: Any, elastic_factory: Any, *, rrf_k: int):
     def factory(k: int, where: dict[str, Any] | None = None) -> _CombinedRetriever:
         chroma = chroma_factory(k=k, where=where) if chroma_factory else None
         elastic = elastic_factory(k=k, where=where) if elastic_factory else None
@@ -133,6 +127,7 @@ def build_runtime(
     from coal_kb.infra.providers.rerank import make_reranker
     from coal_kb.infra.providers.tokenizers import make_tokenizer
     from coal_kb.ingestion.metadata.normalize import Ontology
+    from coal_kb.research import GraphRoute, ResearchRouteService
     from coal_kb.retrieval.query import FilterParser
     from coal_kb.retrieval.query.planner import QueryPlanner
     from coal_kb.retrieval.service import ExpertRetriever
@@ -140,16 +135,9 @@ def build_runtime(
     active_backend = backend or cfg.backend
     active_k = int(k or cfg.retrieval.k)
     active_mode = mode or cfg.retrieval.mode
-    active_rerank = (
-        cfg.retrieval.rerank_enabled
-        if rerank_enabled is None
-        else rerank_enabled
-    )
+    active_rerank = cfg.retrieval.rerank_enabled if rerank_enabled is None else rerank_enabled
     active_rerank_top_n = int(rerank_top_n or cfg.retrieval.rerank_top_n)
-
-    planner = QueryPlanner(
-        filter_parser=FilterParser(onto=Ontology.load(config.ONTOLOGY_PATH))
-    )
+    planner = QueryPlanner(filter_parser=FilterParser(onto=Ontology.load(config.ONTOLOGY_PATH)))
     registry = RegistrySQLite(cfg.registry.sqlite_path)
     chroma_factory = None
     elastic_factory = None
@@ -163,7 +151,6 @@ def build_runtime(
             embedding_model=cfg.embeddings.model,
         )
         chroma_factory = chroma_store.as_retriever
-
     if active_backend in {"elastic", "both"}:
         elastic_store = ElasticStore(
             host=cfg.elastic.host,
@@ -176,13 +163,8 @@ def build_runtime(
             candidates=active_k,
             rrf_k=cfg.retrieval.rrf_k,
             use_icu=cfg.elastic.enable_icu_analyzer,
-            tenant_id=(
-                cfg.tenancy.default_tenant_id
-                if cfg.tenancy.enabled
-                else None
-            ),
+            tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
         )
-
     if active_backend == "both":
         vector_factory = _combine_factories(
             chroma_factory,
@@ -195,7 +177,6 @@ def build_runtime(
         vector_factory = chroma_factory
     else:
         raise ValueError(f"Unsupported retrieval backend: {active_backend}")
-
     if vector_factory is None:
         raise RuntimeError(f"Retrieval backend is unavailable: {active_backend}")
 
@@ -211,9 +192,7 @@ def build_runtime(
         mode=active_mode,
         drop_sections=cfg.retrieval.drop_sections,
         drop_reference_like=cfg.retrieval.drop_reference_like,
-        two_stage_enabled=(
-            active_backend == "elastic" and cfg.retrieval.two_stage.enabled
-        ),
+        two_stage_enabled=active_backend == "elastic" and cfg.retrieval.two_stage.enabled,
         parent_k_candidates=cfg.retrieval.two_stage.parent_k_candidates,
         parent_k_final=cfg.retrieval.two_stage.parent_k_final,
         max_parents=cfg.retrieval.two_stage.max_parents,
@@ -221,18 +200,23 @@ def build_runtime(
         child_k_final=cfg.retrieval.two_stage.child_k_final,
         allow_relax_in_stage2=cfg.retrieval.two_stage.allow_relax_in_stage2,
         elastic_store=elastic_store if active_backend == "elastic" else None,
-        elastic_index=(
-            cfg.elastic.alias_current if active_backend == "elastic" else None
-        ),
-        embeddings_cfg=(cfg.embeddings if active_backend == "elastic" else None),
+        elastic_index=cfg.elastic.alias_current if active_backend == "elastic" else None,
+        embeddings_cfg=cfg.embeddings if active_backend == "elastic" else None,
         elastic_use_icu=cfg.elastic.enable_icu_analyzer,
-        tenant_id=(
-            cfg.tenancy.default_tenant_id
-            if cfg.tenancy.enabled
-            else None
-        ),
+        tenant_id=cfg.tenancy.default_tenant_id if cfg.tenancy.enabled else None,
     )
-
+    complex_service = ComplexQuestionService(
+        retriever=retriever,
+        sqlite_path=cfg.paths.sqlite_path,
+        table_records_path=cfg.complex_qa.table_records_path,
+        comparison_k_per_side=cfg.complex_qa.comparison_k_per_side,
+        max_multi_hop_steps=cfg.complex_qa.max_multi_hop_steps,
+        aggregation_record_limit=cfg.complex_qa.aggregation_record_limit,
+        aggregation_evidence_limit=cfg.complex_qa.aggregation_evidence_limit,
+        table_top_k=cfg.complex_qa.table_top_k,
+        cross_document_min_sources=cfg.complex_qa.cross_document_min_sources,
+        cross_document_max_per_source=cfg.complex_qa.cross_document_max_per_source,
+    )
     llm_config = None
     if enable_llm:
         llm_config = cfg.llm.model_copy(deep=True)
@@ -246,22 +230,11 @@ def build_runtime(
         mode=active_mode,
         planner=planner,
         retriever=retriever,
-        context_builder=ContextBuilder(
-            token_counter=make_tokenizer(cfg.tokenizer).count_tokens
-        ),
-        complex_question_service=ComplexQuestionService(
-            retriever=retriever,
-            sqlite_path=cfg.paths.sqlite_path,
-            table_records_path=cfg.complex_qa.table_records_path,
-            comparison_k_per_side=cfg.complex_qa.comparison_k_per_side,
-            max_multi_hop_steps=cfg.complex_qa.max_multi_hop_steps,
-            aggregation_record_limit=cfg.complex_qa.aggregation_record_limit,
-            aggregation_evidence_limit=cfg.complex_qa.aggregation_evidence_limit,
-            table_top_k=cfg.complex_qa.table_top_k,
-            cross_document_min_sources=cfg.complex_qa.cross_document_min_sources,
-            cross_document_max_per_source=(
-                cfg.complex_qa.cross_document_max_per_source
-            ),
+        context_builder=ContextBuilder(token_counter=make_tokenizer(cfg.tokenizer).count_tokens),
+        complex_question_service=complex_service,
+        research_route_service=ResearchRouteService(
+            standard_service=complex_service,
+            graph_route=GraphRoute(),
         ),
         answerer=Answerer(
             enable_llm=enable_llm and llm_config is not None,
@@ -278,15 +251,15 @@ def execute_query(
     *,
     enable_llm: bool = False,
     original_query: str | None = None,
+    research_route: str = "standard",
     history_used: bool = False,
     history_reason: str = "standalone_query",
 ) -> AskExecution:
-    """执行规划、检索、上下文和回答链路。"""
+    """执行规划、研究路线、上下文和回答链路。"""
     query = normalize_query(original_query or raw_query)
     retrieval_query = normalize_query(raw_query)
     if not retrieval_query:
         raise ValueError("query is empty")
-
     trace: dict[str, Any] = {}
     started = time.monotonic()
     plan = runtime.planner.build_plan(
@@ -296,23 +269,19 @@ def execute_query(
         llm_config=None,
     )
     plan_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
-    documents = runtime.complex_question_service.process(plan, trace=trace)
+    documents = runtime.research_route_service.process(
+        plan,
+        route=research_route,
+        trace=trace,
+    )
     retrieve_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
     context_package = runtime.context_builder.build(plan, documents)
     context_ms = (time.monotonic() - started) * 1000
-
     started = time.monotonic()
-    result = runtime.answerer.answer(
-        plan,
-        context_package,
-        enable_llm=enable_llm,
-    )
+    result = runtime.answerer.answer(plan, context_package, enable_llm=enable_llm)
     answer_ms = (time.monotonic() - started) * 1000
-
     return AskExecution(
         query=query,
         retrieval_query=retrieval_query,
@@ -328,6 +297,7 @@ def execute_query(
             "answer": round(answer_ms, 2),
             "total": round(plan_ms + retrieve_ms + context_ms + answer_ms, 2),
         },
+        research_route=research_route,
         history_used=history_used,
         history_reason=history_reason,
     )
@@ -375,12 +345,14 @@ def ordered_citations(execution: AskExecution) -> list[dict[str, Any]]:
 
 
 def _trace_summary(execution: AskExecution) -> dict[str, Any]:
-    return build_retrieval_trace_summary(
+    summary = build_retrieval_trace_summary(
         retrieval_query=execution.retrieval_query,
         history_used=execution.history_used,
         history_reason=execution.history_reason,
         trace=execution.trace,
     )
+    summary["research_route"] = execution.research_route
+    return summary
 
 
 def build_response_payload(
@@ -426,7 +398,10 @@ def log_query(
     save_trace: bool = False,
 ) -> None:
     """将查询、证据和可选 Trace 写入注册库。"""
-    constraints: dict[str, Any] = {"plan": execution.plan.to_dict()}
+    constraints: dict[str, Any] = {
+        "plan": execution.plan.to_dict(),
+        "research_route": execution.research_route,
+    }
     if save_trace:
         constraints.update(
             {
@@ -444,10 +419,7 @@ def log_query(
         filters=execution.trace.get("where") or {},
         constraints=constraints,
         top_chunk_ids=[document.metadata.get("chunk_id") for document in execution.docs],
-        top_source_files=[
-            document.metadata.get("source_file")
-            for document in execution.docs
-        ],
+        top_source_files=[document.metadata.get("source_file") for document in execution.docs],
         latency_ms=execution.timings_ms["total"],
         backend=runtime.backend,
         tenant_id=None,

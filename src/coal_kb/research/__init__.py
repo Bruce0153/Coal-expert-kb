@@ -1,6 +1,21 @@
 """导出 Milestone D 研究实验与路线能力。"""
 
 from coal_kb.research.agent import AgentAction, ControlledAgentRoute
+from coal_kb.research.agent_models import (
+    AGENT_PLAN_VERSION,
+    AgentExecutionBudget,
+    AgentPlan,
+    AgentPlanStep,
+    ToolExecutionRecord,
+)
+from coal_kb.research.agent_planner import ControlledAgentPlanner
+from coal_kb.research.agent_tools import (
+    AgentToolContext,
+    BudgetedToolExecutor,
+    ToolRegistry,
+    ToolSpec,
+    build_controlled_tool_registry,
+)
 from coal_kb.research.experiments import ResearchExperiment
 from coal_kb.research.graph import GraphRoute
 from coal_kb.research.graph_extraction import ExtractedEntity, KnowledgeGraphExtractor
@@ -34,11 +49,18 @@ from coal_kb.research.visual_assets import (
 )
 
 __all__ = [
+    "AGENT_PLAN_VERSION",
     "ASSET_MANIFEST_VERSION",
     "AblationSuiteRunner",
     "AgentAction",
+    "AgentExecutionBudget",
+    "AgentPlan",
+    "AgentPlanStep",
+    "AgentToolContext",
     "AssetManifest",
     "AssetType",
+    "BudgetedToolExecutor",
+    "ControlledAgentPlanner",
     "ControlledAgentRoute",
     "ExperimentSpec",
     "ExperimentSuiteConfig",
@@ -60,8 +82,12 @@ __all__ = [
     "ResearchRouteService",
     "RouteResult",
     "SuiteRun",
+    "ToolExecutionRecord",
+    "ToolRegistry",
+    "ToolSpec",
     "VISUAL_INDEX_VERSION",
     "VisualAssetIndex",
     "VisualSearchResult",
     "apply_route_parameters",
+    "build_controlled_tool_registry",
 ]

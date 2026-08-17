@@ -10,7 +10,8 @@ Coal Expert KB 是面向煤热解、气化与燃烧文献的证据驱动知识�
 - 支持事实、条件、比较、多跳、统计聚合、表格和跨文档问题。
 - 支持 Standard、Graph、Multimodal 和受控 Agent 研究路线。
 - 提供运行中参考文献上传、增量入库、任务进度、文档管理和知识库统计。
-- 在网页中配置 Tokenizer、Embeddings、Rerank、LLM 的远程或本地 Provider。
+- 本地开发模式支持网页配置 Tokenizer、Embeddings、Rerank、LLM 的远程或本地 Provider。
+- 公网模式提供匿名会话隔离、管理员认证、请求限流、上传限制、Provider 覆盖锁定和健康检查。
 - 提供 CLI、HTTP API、网页、会话历史、离线评估和统一仓库 Harness。
 
 ## 运行链路
@@ -56,7 +57,7 @@ python -m pip install -e ".[dev,docs]"
 
 ## 配置
 
-主配置文件是 `configs/app.yaml`。也可以通过 `COAL_KB_CONFIG` 指向其他配置文件。
+本地默认配置文件是 `configs/app.yaml`。也可以通过 `COAL_KB_CONFIG` 指向其他配置文件。公网部署使用 `configs/prod.yaml`，并通过环境变量注入 Secret、持久化根目录和 Elasticsearch 私网地址。
 
 每项模型能力都显式选择 `remote` 或 `local`，不会在调用失败后自动切换实现。
 
@@ -103,6 +104,8 @@ llm:
     model: "Qwen/Qwen3-8B"
 ```
 
+本地示例：
+
 ```bash
 export DASHSCOPE_API_KEY="..."
 export COAL_KB_CONFIG="configs/app.yaml"
@@ -111,7 +114,11 @@ export COAL_KB_SQLITE_PATH="storage/expert.db"
 export COAL_KB_LOG_LEVEL="INFO"
 ```
 
+生产环境变量以 `.env.example` 为清单，不要将真实 Secret 提交到 Git。
+
 ## 数据目录
+
+本地默认目录：
 
 ```text
 data/
@@ -124,8 +131,10 @@ data/
 storage/
 ├── chroma_db/      # Chroma 数据
 ├── expert.db       # 结构化实验记录
-└── kb.db           # 注册库、查询日志和会话
+└── kb.db           # 注册库、查询日志、会话和后台任务状态
 ```
+
+公网生产环境通过 `COAL_KB_DATA_ROOT=/app/data` 将运行数据统一放入持久化 Volume。
 
 ## 文档摄入与索引
 
@@ -142,7 +151,7 @@ PYTHONPATH=src python scripts/ingest.py --tables --table-flavor auto
 
 ## 网页与运行中增量入库
 
-启动服务：
+启动本地服务：
 
 ```bash
 PYTHONPATH=src python scripts/serve.py
@@ -150,7 +159,7 @@ PYTHONPATH=src python scripts/serve.py
 
 打开 `http://127.0.0.1:8000/`。
 
-“知识库管理”提供：
+管理员“知识库管理”提供：
 
 - 拖拽或选择多个参考文献；
 - 文件传输进度；
@@ -159,11 +168,11 @@ PYTHONPATH=src python scripts/serve.py
 - 文档列表、删除、统计和手动摄入；
 - 单工作线程串行更新索引，避免并发写入。
 
-上传返回任务 ID，前端通过 `/api/admin/tasks/{task_id}` 获取状态。上传过程中问答服务可以继续运行；新文献完成索引后进入后续检索。
+上传返回任务 ID，前端通过 `/api/admin/tasks/{task_id}` 获取状态。任务元数据写入 registry SQLite；服务重启后完成任务仍可查询，执行中任务会被明确标记为 `interrupted`，需要重新执行。
 
 ## 网页 Provider 设置
 
-“设置”可以配置：
+本地开发模式中，“设置”可以配置：
 
 - 检索后端、模式、Top-K 和 Rerank；
 - Tokenizer 的模式、Provider、地址、模型和远程 API Key；
@@ -172,7 +181,38 @@ PYTHONPATH=src python scripts/serve.py
 - LLM 的模式、Provider、地址、模型和远程 API Key；
 - Standard、Graph、Multimodal 或 Agent 研究路线。
 
-设置立即作用于后续问答和增量入库。API Key 不写入配置文件，仅保存在服务进程和当前浏览器会话。切换 Embedding 模型时必须保证与已有索引向量空间一致，否则应重建索引。
+本地设置立即作用于后续问答和增量入库。切换 Embedding 模型时必须保证与已有索引向量空间一致，否则应重建索引。
+
+公网模式下普通访客不能修改服务器级 Provider、Base URL、API Key、Backend、Debug 或高成本研究参数。管理员通过 `/admin` 登录后才能看到并使用“知识库管理”和“设置”。
+
+## 公网部署
+
+正式部署只维护 Railway 路径：FastAPI 与 Elasticsearch 位于同一 Railway Project / Environment，FastAPI 对公网开放，Elasticsearch 只走 `railway.internal` 私网；FastAPI Volume 挂载 `/app/data`，Elasticsearch 使用独立数据 Volume。
+
+仓库已提供：
+
+```text
+Dockerfile
+railway.toml
+configs/prod.yaml
+.env.example
+docs/deployment.md
+```
+
+健康检查：
+
+```text
+GET /health   # liveness
+GET /ready    # readiness，不调用收费 LLM
+```
+
+管理员入口：
+
+```text
+GET /admin
+```
+
+完整部署、Volume、Secret、私网 Elasticsearch、备份与 Release Gate 见 [docs/deployment.md](docs/deployment.md)。
 
 ## 命令行问答
 
@@ -202,21 +242,26 @@ PYTHONPATH=src python scripts/ask.py --research-route graph --debug
 
 ```text
 GET    /health
+GET    /ready
+GET    /admin
 POST   /api/ask
 POST   /api/chat
 GET    /api/conversations
 GET    /api/settings/runtime
-PUT    /api/settings/runtime
-DELETE /api/settings/runtime
-POST   /api/admin/documents/upload
-GET    /api/admin/tasks/{task_id}
-GET    /api/admin/documents
-DELETE /api/admin/documents/{document_id}
-POST   /api/admin/ingest
-GET    /api/admin/stats
+PUT    /api/settings/runtime                 # admin
+DELETE /api/settings/runtime                 # admin
+GET    /api/auth/admin/status
+POST   /api/auth/admin/login
+POST   /api/auth/admin/logout
+POST   /api/admin/documents/upload           # admin
+GET    /api/admin/tasks/{task_id}            # admin
+GET    /api/admin/documents                   # admin
+DELETE /api/admin/documents/{document_id}    # admin
+POST   /api/admin/ingest                      # admin
+GET    /api/admin/stats                       # admin
 ```
 
-示例：
+本地开发示例：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/ask \
@@ -231,6 +276,8 @@ curl -X POST http://127.0.0.1:8000/api/ask \
     "debug": true
   }'
 ```
+
+公网模式会忽略或拒绝客户端对服务器级运行参数的越权覆盖。
 
 ## Milestone D 研究路线
 
@@ -289,14 +336,14 @@ python -m pip install -r requirements/ci.txt
 bash scripts/quality/check_repository.sh
 ```
 
-Harness 检查 Python 编译、内部 import、依赖一致性、`pip check`、Ruff、mypy 和全量 pytest。离线验收不下载模型、不调用远程 API，也不要求 Elasticsearch 在线。
+Harness 检查 Python 编译、内部 import、依赖一致性、`pip check`、Ruff、mypy、全量 pytest 和 production smoke test。离线验收不下载模型、不调用远程 API，也不要求 Elasticsearch 在线。
 
 ## 项目结构
 
 ```text
 src/coal_kb/
 ├── core/            # 核心模型和契约
-├── infra/           # 配置、Provider、持久化和可观测性
+├── infra/           # 配置、Provider、持久化、安全和可观测性
 ├── ingestion/       # Loader、解析、Chunking 和元数据
 ├── indexing/        # 索引构建与校验
 ├── recall/          # Dense、Sparse、父子召回和 RRF
@@ -305,10 +352,11 @@ src/coal_kb/
 ├── research/        # 实验、Graph、多模态和受控 Agent 路线
 ├── context/         # 证据预算、引用和上下文构建
 ├── answering/       # 回答、Claim 和置信度
-├── application/     # 问答、会话、管理和运行配置
+├── application/     # 问答、会话、管理、后台任务和运行配置
 ├── interfaces/      # CLI、HTTP API 和网页
 ├── evaluation/      # 数据、指标、Pipeline 和报告
 ├── conversation/    # 会话历史与存储
+├── operations/      # liveness / readiness
 ├── records/         # 结构化记录抽取
 └── utils/           # 公共工具
 ```
@@ -321,6 +369,7 @@ src/coal_kb/
 - 引用必须可追溯到来源、页码、章节或 Chunk。
 - Graph 和多模态路线只处理标准路线已召回的证据。
 - Agent 只能执行固定白名单动作并受最大步数约束。
+- 公网模式不信任客户端提供的模型、Provider、Base URL、Debug 或管理操作参数。
 - 离线测试不得下载模型、调用远程服务或依赖本地 Elasticsearch。
 
 ## License

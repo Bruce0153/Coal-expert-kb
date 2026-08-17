@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from sqlalchemy import text as sql_text
 
+from coal_kb.application.import_task_store import ImportTaskStore
 from coal_kb.application.runtime_config import RuntimeConfigStore
 from coal_kb.infra.persistence.registry import RegistrySQLite
 from coal_kb.infra.persistence.search import ElasticStore
@@ -33,14 +34,31 @@ class ImportTask:
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+def _task_from_payload(payload: dict[str, Any]) -> ImportTask:
+    return ImportTask(
+        task_id=str(payload["task_id"]),
+        status=str(payload.get("status", "queued")),
+        stage=str(payload.get("stage", "queued")),
+        message=str(payload.get("message", "任务已进入队列。")),
+        progress=int(payload.get("progress", 0)),
+        saved=[str(item) for item in payload.get("saved", [])],
+        errors=[str(item) for item in payload.get("errors", [])],
+        stats=payload.get("stats"),
+        created_at=str(payload.get("created_at", datetime.now(timezone.utc).isoformat())),
+        updated_at=str(payload.get("updated_at", datetime.now(timezone.utc).isoformat())),
+    )
+
+
 class AdminService:
-    """使用单工作线程串行执行增量摄入，避免同时写入索引。"""
+    """使用单工作线程串行执行增量摄入，并持久化任务状态。"""
 
     def __init__(self, configs: RuntimeConfigStore) -> None:
         self.configs = configs
         self._tasks: dict[str, ImportTask] = {}
         self._lock = RLock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="coal-kb-ingest")
+        self._task_store = ImportTaskStore(configs.snapshot().registry.sqlite_path)
+        self._restore_tasks()
 
     def get_stats(self) -> dict[str, Any]:
         cfg = self.configs.snapshot()
@@ -102,9 +120,15 @@ class AdminService:
     def get_task(self, task_id: str) -> dict[str, Any]:
         with self._lock:
             task = self._tasks.get(task_id)
-            if task is None:
-                raise KeyError(task_id)
-            return asdict(task)
+            if task is not None:
+                return asdict(task)
+        payload = self._task_store.get(task_id)
+        if payload is None:
+            raise KeyError(task_id)
+        task = _task_from_payload(payload)
+        with self._lock:
+            self._tasks[task_id] = task
+        return asdict(task)
 
     def delete_document(self, document_id: str) -> bool:
         cfg = self.configs.snapshot()
@@ -117,10 +141,24 @@ class AdminService:
         self._delete_from_elasticsearch(cfg, document_id)
         return True
 
+    def _restore_tasks(self) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        for payload in self._task_store.list_recent(limit=100):
+            task = _task_from_payload(payload)
+            if task.status in {"queued", "running"}:
+                task.status = "failed"
+                task.stage = "interrupted"
+                task.message = "服务在任务执行期间重启，请重新执行该任务。"
+                task.progress = 100
+                task.updated_at = now
+                self._task_store.save(asdict(task))
+            self._tasks[task.task_id] = task
+
     def _new_task(self, message: str) -> ImportTask:
         task = ImportTask(task_id=uuid4().hex, message=message)
         with self._lock:
             self._tasks[task.task_id] = task
+            self._task_store.save(asdict(task))
         return task
 
     def _update_task(self, task_id: str, **changes: Any) -> None:
@@ -129,6 +167,7 @@ class AdminService:
             for key, value in changes.items():
                 setattr(task, key, value)
             task.updated_at = datetime.now(timezone.utc).isoformat()
+            self._task_store.save(asdict(task))
 
     def _process_import(
         self,

@@ -24,6 +24,7 @@ def main() -> None:
         )
 
         from coal_kb.infra.config import load_config
+        from coal_kb.infra.providers.tokenizers import make_tokenizer
         from coal_kb.infra.security import PublicSecurityPolicy
         from coal_kb.interfaces.api.app import app
 
@@ -37,10 +38,22 @@ def main() -> None:
         assert Path(cfg.paths.sqlite_path) == root / "expert.db"
         assert Path(cfg.paths.raw_pdfs_dir) == root / "raw_pdfs"
         assert Path(cfg.paths.chroma_dir) == root / "chroma_db"
+        assert cfg.tokenizer.mode == "local"
+        assert cfg.tokenizer.local.provider == "tiktoken"
+        assert cfg.tokenizer.local.model == "cl100k_base"
+        assert make_tokenizer(cfg.tokenizer).count_tokens("production smoke test") > 0
         assert policy.public_mode is True
 
         route_paths = {route.path for route in app.routes}
-        for expected in ("/", "/health", "/ready", "/api/chat", "/api/ask", "/api/auth/admin/login"):
+        for expected in (
+            "/",
+            "/admin",
+            "/health",
+            "/ready",
+            "/api/chat",
+            "/api/ask",
+            "/api/auth/admin/login",
+        ):
             assert expected in route_paths
 
         railway = tomllib.loads(Path("railway.toml").read_text(encoding="utf-8"))

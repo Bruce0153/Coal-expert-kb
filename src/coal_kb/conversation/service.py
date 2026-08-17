@@ -5,32 +5,36 @@ from .store import ConversationStore
 
 
 class ConversationService:
-    def __init__(self, store: ConversationStore) -> None:
+    def __init__(self, store: ConversationStore, *, session_id: str = "legacy") -> None:
         self.store = store
+        self.session_id = session_id
+
+    def for_session(self, session_id: str) -> "ConversationService":
+        return ConversationService(self.store, session_id=session_id)
 
     def create_conversation(self, *, title: str | None = None) -> ConversationSummary:
-        return self.store.create_conversation(title=title)
+        return self.store.create_conversation(title=title, session_id=self.session_id)
 
     def ensure_conversation(self, conversation_id: str | None, *, title_hint: str | None = None) -> ConversationSummary:
         if conversation_id:
-            conversation = self.store.get_conversation(conversation_id)
+            conversation = self.store.get_conversation(conversation_id, session_id=self.session_id)
             if conversation is not None:
                 return conversation
             raise KeyError(f"Conversation not found: {conversation_id}")
         title = self._title_from_hint(title_hint) if title_hint else None
-        return self.store.create_conversation(title=title)
+        return self.store.create_conversation(title=title, session_id=self.session_id)
 
     def list_conversations(self, *, limit: int = 50) -> list[ConversationSummary]:
-        return self.store.list_conversations(limit=limit)
+        return self.store.list_conversations(limit=limit, session_id=self.session_id)
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        return self.store.delete_conversation(conversation_id)
+        return self.store.delete_conversation(conversation_id, session_id=self.session_id)
 
     def get_state(self, conversation_id: str) -> ConversationState:
-        conversation = self.store.get_conversation(conversation_id)
+        conversation = self.store.get_conversation(conversation_id, session_id=self.session_id)
         if conversation is None:
             raise KeyError(f"Conversation not found: {conversation_id}")
-        messages = self.store.list_messages(conversation_id)
+        messages = self.store.list_messages(conversation_id, session_id=self.session_id)
         return ConversationState(conversation=conversation, messages=messages)
 
     def list_messages(self, conversation_id: str) -> list[ConversationMessage]:
@@ -49,10 +53,11 @@ class ConversationService:
             role=role,
             content=content,
             metadata=metadata,
+            session_id=self.session_id,
         )
-        conversation = self.store.get_conversation(conversation_id)
+        conversation = self.store.get_conversation(conversation_id, session_id=self.session_id)
         if conversation and conversation.title == "New conversation" and role == "user":
-            self.store.update_title(conversation_id, self._title_from_hint(content))
+            self.store.update_title(conversation_id, self._title_from_hint(content), session_id=self.session_id)
         return message
 
     def _title_from_hint(self, text: str | None) -> str:

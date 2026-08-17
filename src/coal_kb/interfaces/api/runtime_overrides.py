@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from coal_kb.infra.config import AppConfig
@@ -18,7 +19,7 @@ REMOTE_PROVIDERS = [
     "zhipu",
 ]
 LOCAL_PROVIDERS = {
-    "tokenizer": ["huggingface"],
+    "tokenizer": ["tiktoken", "huggingface"],
     "embeddings": ["huggingface"],
     "rerank": ["cross_encoder"],
     "llm": ["openai_compatible", "vllm", "ollama"],
@@ -50,38 +51,10 @@ def _apply_capability(
 def apply_runtime_overrides(cfg: AppConfig, payload: RuntimeSettingsRequest) -> AppConfig:
     """分别覆盖四项能力，远程密钥只保留在进程内配置。"""
     runtime_cfg = cfg.model_copy(deep=True)
-    _apply_capability(
-        runtime_cfg.tokenizer,
-        mode=payload.tokenizer_mode,
-        provider=payload.tokenizer_provider,
-        base_url=payload.tokenizer_base_url,
-        api_key=payload.tokenizer_api_key,
-        model=payload.tokenizer_model,
-    )
-    _apply_capability(
-        runtime_cfg.embeddings,
-        mode=payload.embedding_mode,
-        provider=payload.embedding_provider,
-        base_url=payload.embedding_base_url,
-        api_key=payload.embedding_api_key,
-        model=payload.embedding_model,
-    )
-    _apply_capability(
-        runtime_cfg.rerank,
-        mode=payload.rerank_mode,
-        provider=payload.rerank_provider,
-        base_url=payload.rerank_base_url,
-        api_key=payload.rerank_api_key,
-        model=payload.rerank_model,
-    )
-    _apply_capability(
-        runtime_cfg.llm,
-        mode=payload.llm_mode,
-        provider=None if payload.llm_provider == "none" else payload.llm_provider,
-        base_url=payload.llm_base_url,
-        api_key=payload.llm_api_key,
-        model=payload.llm_model,
-    )
+    _apply_capability(runtime_cfg.tokenizer, mode=payload.tokenizer_mode, provider=payload.tokenizer_provider, base_url=payload.tokenizer_base_url, api_key=payload.tokenizer_api_key, model=payload.tokenizer_model)
+    _apply_capability(runtime_cfg.embeddings, mode=payload.embedding_mode, provider=payload.embedding_provider, base_url=payload.embedding_base_url, api_key=payload.embedding_api_key, model=payload.embedding_model)
+    _apply_capability(runtime_cfg.rerank, mode=payload.rerank_mode, provider=payload.rerank_provider, base_url=payload.rerank_base_url, api_key=payload.rerank_api_key, model=payload.rerank_model)
+    _apply_capability(runtime_cfg.llm, mode=payload.llm_mode, provider=None if payload.llm_provider == "none" else payload.llm_provider, base_url=payload.llm_base_url, api_key=payload.llm_api_key, model=payload.llm_model)
     if payload.backend:
         runtime_cfg.backend = payload.backend
     if payload.mode:
@@ -92,16 +65,20 @@ def apply_runtime_overrides(cfg: AppConfig, payload: RuntimeSettingsRequest) -> 
     return runtime_cfg
 
 
+def _remote_key_configured(config: Any) -> bool:
+    return bool(config.remote.api_key or os.getenv(config.remote.api_key_env, "").strip())
+
+
 def _capability_defaults(config: Any) -> dict[str, Any]:
     remote = config.remote.model_dump(exclude={"api_key"})
-    remote["api_key_configured"] = bool(config.remote.api_key)
+    remote["api_key_configured"] = _remote_key_configured(config)
     active = config.remote if config.mode == "remote" else config.local
     missing: list[str] = []
     if not str(getattr(active, "provider", "") or "").strip():
         missing.append("provider")
     if not str(getattr(active, "model", "") or "").strip():
         missing.append("model")
-    if config.mode == "remote" and not config.remote.api_key:
+    if config.mode == "remote" and not _remote_key_configured(config):
         missing.append("api_key")
     return {
         "mode": config.mode,
@@ -133,10 +110,7 @@ def build_settings_defaults(cfg: AppConfig) -> SettingsDefaultsResponse:
         backend_options=["elastic", "chroma", "both"],
         mode_options=["strict", "balanced", "broad"],
         research_route_options=[route.value for route in ResearchRoute],
-        provider_options={
-            capability: {"remote": REMOTE_PROVIDERS, "local": providers}
-            for capability, providers in LOCAL_PROVIDERS.items()
-        },
+        provider_options={capability: {"remote": REMOTE_PROVIDERS, "local": providers} for capability, providers in LOCAL_PROVIDERS.items()},
         notes=[
             "绿色状态表示配置完整，不代表已经发起网络连通测试。",
             "设置会立即应用于后续问答和增量入库，但不会把 API Key 写入磁盘。",

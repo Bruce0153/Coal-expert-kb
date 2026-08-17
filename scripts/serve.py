@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 
 import uvicorn
@@ -23,10 +24,14 @@ class Serve:
         )
 
 
+def _public_mode() -> bool:
+    return os.getenv("COAL_KB_PUBLIC_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve the Coal Expert KB web app.")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="0.0.0.0" if _public_mode() else "127.0.0.1")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()
     Serve(host=args.host, port=args.port, reload=args.reload).process()

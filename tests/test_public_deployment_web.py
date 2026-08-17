@@ -19,6 +19,17 @@ def test_admin_entry_uses_http_only_server_auth_flow() -> None:
     assert "sessionStorage" not in script
 
 
+def test_public_home_hides_admin_controls_until_authenticated() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "public_access.js").read_text(encoding="utf-8")
+    assert 'id="manage-toggle" class="ghost-button hidden"' in html
+    assert 'id="settings-toggle" class="ghost-button hidden"' in html
+    assert 'id="settings-summary" class="settings-summary hidden"' in html
+    assert '/static/public_access.js' in html
+    assert "/api/auth/admin/status" in script
+    assert 'classList.toggle("hidden", !authenticated)' in script
+
+
 def test_public_security_headers_are_wired_into_api() -> None:
     headers = (ROOT / "src/coal_kb/infra/security/headers.py").read_text(encoding="utf-8")
     app = (ROOT / "src/coal_kb/interfaces/api/app.py").read_text(encoding="utf-8")
@@ -33,6 +44,7 @@ def test_public_security_headers_are_wired_into_api() -> None:
         assert header in headers
     assert "PublicHeadersMiddleware" in app
     assert '@app.get("/admin")' in app
+    assert "服务暂时不可用，请稍后再试。" in app
 
 
 def test_official_deployment_contract_is_present() -> None:

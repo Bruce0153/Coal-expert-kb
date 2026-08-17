@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from coal_kb.application.runtime_config import RuntimeConfigStore
@@ -18,7 +18,7 @@ from coal_kb.interfaces.api.routes_auth import build_auth_router
 from coal_kb.interfaces.api.routes_chat import build_chat_router
 from coal_kb.interfaces.api.routes_settings import build_settings_router
 from coal_kb.interfaces.web import web_static_dir
-from coal_kb.operations import health_status
+from coal_kb.operations import health_status, readiness_status
 
 
 def create_app() -> FastAPI:
@@ -55,6 +55,11 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return health_status()
+
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        is_ready, payload = readiness_status(cfg)
+        return JSONResponse(content=payload, status_code=200 if is_ready else 503)
 
     @app.get("/")
     def index() -> FileResponse:

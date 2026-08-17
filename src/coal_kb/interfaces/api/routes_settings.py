@@ -12,8 +12,11 @@ from coal_kb.interfaces.api.runtime_overrides import apply_runtime_overrides, bu
 
 
 def build_settings_router(configs: RuntimeConfigStore, auth: AdminAuth | None = None) -> APIRouter:
-    policy = PublicSecurityPolicy.from_env()
-    auth = auth or AdminAuth(policy)
+    if auth is None:
+        policy = PublicSecurityPolicy.from_env()
+        auth = AdminAuth(policy)
+    else:
+        policy = auth.policy
     router = APIRouter(prefix="/api/settings", tags=["settings"])
 
     @router.get(

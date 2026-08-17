@@ -1,0 +1,6 @@
+extends: app.yaml
+
+backend: elastic
+
+logging:
+  level: INFO

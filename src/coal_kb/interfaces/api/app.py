@@ -24,6 +24,7 @@ from coal_kb.interfaces.api.routes_admin import build_admin_router
 from coal_kb.interfaces.api.routes_ask import build_ask_router
 from coal_kb.interfaces.api.routes_auth import build_auth_router
 from coal_kb.interfaces.api.routes_chat import build_chat_router
+from coal_kb.interfaces.api.routes_public import build_public_router
 from coal_kb.interfaces.api.routes_settings import build_settings_router
 from coal_kb.interfaces.web import web_static_dir
 from coal_kb.operations import health_status, readiness_status
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     )
 
     conversations = ConversationService(ConversationStore(cfg.registry.sqlite_path))
+    app.include_router(build_public_router(configs, policy))
     app.include_router(build_auth_router(auth))
     app.include_router(build_ask_router(configs, policy, guard))
     app.include_router(build_chat_router(configs, conversations, policy, guard))

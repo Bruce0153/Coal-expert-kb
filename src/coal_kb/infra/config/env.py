@@ -6,12 +6,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class EnvSettings(BaseSettings):
-    """
-    Environment variable overrides (keep minimal and stable).
-    """
+    """Stable environment-variable overrides shared by local and production runs."""
+
     model_config = SettingsConfigDict(env_prefix="COAL_KB_", extra="ignore")
 
     config: str = "configs/app.yaml"
+    data_root: Optional[str] = None
+    elastic_url: Optional[str] = None
 
     chroma_dir: Optional[str] = None
     sqlite_path: Optional[str] = None

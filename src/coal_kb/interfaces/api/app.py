@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
 
     conversations = ConversationService(ConversationStore(cfg.registry.sqlite_path))
     app.include_router(build_public_router(configs, policy))
-    app.include_router(build_auth_router(auth))
+    app.include_router(build_auth_router(auth, guard))
     app.include_router(build_ask_router(configs, policy, guard))
     app.include_router(build_chat_router(configs, conversations, policy, guard))
     app.include_router(build_admin_router(configs, auth, policy))
@@ -70,10 +70,11 @@ def create_app() -> FastAPI:
         if not policy.public_mode:
             raise exc
         request_id = str(getattr(request.state, "request_id", "unknown"))
-        LOGGER.exception(
+        LOGGER.error(
             "Unhandled request error request_id=%s path=%s",
             request_id,
             request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
         return JSONResponse(
             status_code=500,

@@ -10,7 +10,13 @@ from coal_kb.conversation.service import ConversationService
 from coal_kb.conversation.store import ConversationStore
 from coal_kb.infra.config import load_config
 from coal_kb.infra.observability.logging import setup_logging
-from coal_kb.infra.security import AdminAuth, PublicRequestGuard, PublicSecurityPolicy, PublicSessionMiddleware
+from coal_kb.infra.security import (
+    AdminAuth,
+    PublicHeadersMiddleware,
+    PublicRequestGuard,
+    PublicSecurityPolicy,
+    PublicSessionMiddleware,
+)
 from coal_kb.interfaces.api import config
 from coal_kb.interfaces.api.routes_admin import build_admin_router
 from coal_kb.interfaces.api.routes_ask import build_ask_router
@@ -34,6 +40,7 @@ def create_app() -> FastAPI:
         description=config.API_DESCRIPTION,
     )
     app.add_middleware(PublicSessionMiddleware, policy=policy)
+    app.add_middleware(PublicHeadersMiddleware, policy=policy)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(policy.allowed_origins) if policy.public_mode else config.CORS_ALLOWED_ORIGINS,
@@ -60,6 +67,10 @@ def create_app() -> FastAPI:
     def ready() -> JSONResponse:
         is_ready, payload = readiness_status(cfg)
         return JSONResponse(content=payload, status_code=200 if is_ready else 503)
+
+    @app.get("/admin")
+    def admin() -> FileResponse:
+        return FileResponse(static_dir / "admin.html")
 
     @app.get("/")
     def index() -> FileResponse:

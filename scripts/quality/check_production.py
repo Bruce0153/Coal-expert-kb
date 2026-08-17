@@ -8,6 +8,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
+def _requirement_name(requirement: str) -> str:
+    for separator in (">=", "<=", "==", "~=", ">", "<", "["):
+        requirement = requirement.split(separator, 1)[0]
+    return requirement.strip().lower().replace("_", "-")
+
+
 def main() -> None:
     with TemporaryDirectory(prefix="coal-kb-production-") as data_root:
         os.environ.update(
@@ -60,6 +66,16 @@ def main() -> None:
         assert railway["build"]["builder"] == "DOCKERFILE"
         assert railway["deploy"]["healthcheckPath"] == "/ready"
         assert Path("Dockerfile").is_file()
+
+        project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+        base_dependencies = {_requirement_name(item) for item in project["dependencies"]}
+        local_dependencies = {
+            _requirement_name(item)
+            for item in project["optional-dependencies"]["local-models"]
+        }
+        heavy_local = {"torch", "transformers", "sentence-transformers", "langchain-huggingface"}
+        assert not (heavy_local & base_dependencies)
+        assert heavy_local <= local_dependencies
 
 
 if __name__ == "__main__":

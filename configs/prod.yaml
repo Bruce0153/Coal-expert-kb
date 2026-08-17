@@ -1,0 +1,15 @@
+extends: app.yaml
+
+backend: elastic
+
+logging:
+  level: INFO
+
+tokenizer:
+  mode: local
+  local:
+    provider: tiktoken
+    model: cl100k_base
+    model_path: null
+    device: auto
+    trust_remote_code: false

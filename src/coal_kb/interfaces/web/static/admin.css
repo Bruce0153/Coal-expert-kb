@@ -1,0 +1,21 @@
+* { box-sizing: border-box; }
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212b; background: #f4f7f9; }
+body { margin: 0; min-height: 100vh; }
+.admin-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.admin-card { width: min(520px, 100%); background: #fff; border: 1px solid #dfe7ec; border-radius: 18px; padding: 32px; box-shadow: 0 18px 50px rgba(24, 33, 43, 0.08); }
+.eyebrow { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #687785; }
+h1 { margin: 0; font-size: 30px; line-height: 1.2; }
+.copy, .hint { color: #5f6d79; line-height: 1.65; }
+.status { margin: 22px 0; border-radius: 10px; background: #f2f5f7; padding: 12px 14px; font-size: 14px; }
+.status.success { background: #eef8f2; color: #24633c; }
+.status.error { background: #fff1f1; color: #9c2f2f; }
+.login-form { display: grid; gap: 10px; }
+.login-form label { font-size: 13px; font-weight: 700; }
+.login-form input { width: 100%; min-height: 44px; border: 1px solid #cfd9df; border-radius: 10px; padding: 10px 12px; font: inherit; }
+button, .primary-link { min-height: 44px; border-radius: 10px; border: 0; padding: 0 16px; font: inherit; font-weight: 700; cursor: pointer; }
+.login-form button, .primary-link { background: #18212b; color: #fff; }
+.primary-link { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.secondary-button { background: #eef2f4; color: #26323c; }
+.actions { display: grid; gap: 10px; }
+.hidden { display: none !important; }
+.hint { margin: 22px 0 0; font-size: 12px; }

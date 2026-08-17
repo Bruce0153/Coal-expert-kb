@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Coal Expert KB 管理入口</title>
+    <link rel="stylesheet" href="/static/admin.css" />
+  </head>
+  <body>
+    <main class="admin-shell">
+      <section class="admin-card" aria-labelledby="admin-title">
+        <p class="eyebrow">Coal Expert KB</p>
+        <h1 id="admin-title">管理员入口</h1>
+        <p class="copy">登录后才能修改 Provider 配置、上传或删除文献、执行知识库摄入。普通访客不需要管理员权限。</p>
+
+        <div id="admin-status" class="status" aria-live="polite">正在检查登录状态…</div>
+
+        <form id="admin-login-form" class="login-form">
+          <label for="admin-password">管理员 Secret</label>
+          <input id="admin-password" name="password" type="password" autocomplete="current-password" required />
+          <button id="admin-login-button" type="submit">登录</button>
+        </form>
+
+        <div id="admin-actions" class="actions hidden">
+          <a class="primary-link" href="/">进入主站管理</a>
+          <button id="admin-logout-button" class="secondary-button" type="button">退出管理员登录</button>
+        </div>
+
+        <p class="hint">管理员 Secret 只用于当前站点认证，不会写入浏览器存储。认证结果保存在 HttpOnly Cookie 中。</p>
+      </section>
+    </main>
+    <script src="/static/admin.js" defer></script>
+  </body>
+</html>

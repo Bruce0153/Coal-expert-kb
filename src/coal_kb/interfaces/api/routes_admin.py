@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from coal_kb.application.admin import AdminService
 from coal_kb.application.runtime_config import RuntimeConfigStore
+from coal_kb.infra.security import AdminAuth, PublicSecurityPolicy
 
 
 class DocumentInfo(BaseModel):
@@ -43,8 +45,18 @@ class ImportTaskResponse(BaseModel):
     updated_at: str
 
 
-def build_admin_router(configs: RuntimeConfigStore) -> APIRouter:
-    router = APIRouter(prefix="/api/admin", tags=["admin"])
+def build_admin_router(
+    configs: RuntimeConfigStore,
+    auth: AdminAuth | None = None,
+    policy: PublicSecurityPolicy | None = None,
+) -> APIRouter:
+    policy = policy or PublicSecurityPolicy.from_env()
+    auth = auth or AdminAuth(policy)
+    router = APIRouter(
+        prefix="/api/admin",
+        tags=["admin"],
+        dependencies=[Depends(auth.require_admin)],
+    )
     service = AdminService(configs)
 
     @router.get("/stats", response_model=KBStats)
@@ -60,10 +72,28 @@ def build_admin_router(configs: RuntimeConfigStore) -> APIRouter:
         files: Annotated[list[UploadFile], File()],
         auto_ingest: bool = True,
     ) -> ImportTaskResponse:
+        if not files:
+            raise HTTPException(status_code=400, detail="至少需要选择一个文件。")
+        if len(files) > policy.upload_max_files:
+            raise HTTPException(status_code=413, detail=f"一次最多上传 {policy.upload_max_files} 个文件。")
+
         buffered: list[tuple[str, bytes]] = []
+        total_size = 0
+        allowed_exts = {item.lower() for item in policy.upload_allowed_exts}
         for upload in files:
-            if upload.filename:
-                buffered.append((upload.filename, await upload.read()))
+            if not upload.filename:
+                continue
+            extension = Path(upload.filename).suffix.lower()
+            if extension not in allowed_exts:
+                raise HTTPException(status_code=415, detail=f"不支持的文件类型：{extension or '无扩展名'}。")
+            content = await upload.read(policy.upload_max_file_bytes + 1)
+            if len(content) > policy.upload_max_file_bytes:
+                raise HTTPException(status_code=413, detail=f"文件过大：{upload.filename}。")
+            total_size += len(content)
+            if total_size > policy.upload_max_total_bytes:
+                raise HTTPException(status_code=413, detail="本次上传文件总大小超过限制。")
+            buffered.append((upload.filename, content))
+
         if not buffered:
             raise HTTPException(status_code=400, detail="至少需要选择一个文件。")
         return ImportTaskResponse.model_validate(

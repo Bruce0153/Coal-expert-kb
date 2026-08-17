@@ -24,6 +24,7 @@ trap cleanup EXIT
 python -m compileall -q src/coal_kb scripts tests
 python scripts/quality/check_internal_imports.py
 python scripts/quality/check_dependencies.py
+python scripts/quality/check_production.py
 python -m pip check
 ruff check src/coal_kb scripts tests
 MYPYPATH="$REPO_ROOT/src" mypy src/coal_kb

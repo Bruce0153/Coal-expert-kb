@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Coal Expert KB：面向煤热解、气化与燃烧研究的证据检索、引用溯源与科学问答系统。" />
     <title>煤炭化工专家检索系统</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <link rel="stylesheet" href="/static/usability.css" />
@@ -22,19 +23,19 @@
         </div>
         <div class="topbar-actions">
           <div id="backend-pill" class="status-pill" aria-live="polite">检查连接中…</div>
-          <button id="manage-toggle" class="ghost-button" type="button">知识库管理</button>
+          <button id="manage-toggle" class="ghost-button hidden" type="button">知识库管理</button>
           <button id="new-chat-top" class="ghost-button" type="button">新对话</button>
-          <button id="settings-toggle" class="ghost-button" type="button">设置</button>
+          <button id="settings-toggle" class="ghost-button hidden" type="button">设置</button>
         </div>
       </header>
 
       <main class="workspace">
         <aside class="sidebar panel">
           <div class="sidebar-header">
-            <div><h2>对话记录</h2><p>持久化保存，支持多轮追问。</p></div>
+            <div><h2>对话记录</h2><p>按当前浏览器会话隔离保存，支持多轮追问。</p></div>
             <button id="new-chat-sidebar" class="primary-button compact" type="button">新建</button>
           </div>
-          <div id="settings-summary" class="settings-summary"></div>
+          <div id="settings-summary" class="settings-summary hidden"></div>
           <section class="sidebar-section">
             <div class="section-label-row">
               <span class="section-label">历史会话</span>
@@ -51,8 +52,8 @@
           <section id="welcome-panel" class="welcome-panel panel">
             <div class="welcome-copy">
               <p class="eyebrow">欢迎使用</p>
-              <h2>提出问题，检查证据，并在运行中补充新的参考文献。</h2>
-              <p>回答、引用、来源卡片和诊断信息会一起展示。上传后的文献可自动增量写入当前知识库。</p>
+              <h2>提出问题，检查证据，并追溯回答所依据的文献来源。</h2>
+              <p>回答、引用、来源卡片和证据条目会一起展示。知识库维护功能仅对管理员开放。</p>
             </div>
             <div class="sample-prompts">
               <button id="sample-question" class="sample-chip" type="button">蒸汽气化在1200K附近如何影响NH3和HCN的生成？</button>
@@ -154,5 +155,6 @@
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
     <script src="/static/app.js"></script>
+    <script src="/static/public_access.js"></script>
   </body>
 </html>

@@ -97,7 +97,7 @@ def default_tokenizer_config() -> TokenizerProviderConfig:
             model="remote-tokenizer",
             endpoint="/tokenize",
         ),
-        local=LocalProviderConfig(provider="huggingface", model="Qwen/Qwen3-8B", trust_remote_code=True),
+        local=LocalProviderConfig(provider="tiktoken", model="cl100k_base"),
     )
 
 

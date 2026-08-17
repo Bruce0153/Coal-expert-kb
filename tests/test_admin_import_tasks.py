@@ -57,3 +57,29 @@ def test_upload_can_trigger_incremental_ingestion(monkeypatch, tmp_path: Path) -
     assert completed["stage"] == "completed"
     assert completed["stats"]["indexed"] == 3
     assert observed[0].paths.raw_docs_dir == cfg.paths.raw_docs_dir
+
+
+def test_completed_task_survives_service_restart(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    service = AdminService(RuntimeConfigStore(cfg))
+    task = service.start_import([("paper.txt", b"persistent task")], auto_ingest=False)
+    completed = _wait(service, task["task_id"])
+
+    restarted = AdminService(RuntimeConfigStore(cfg))
+    restored = restarted.get_task(task["task_id"])
+    assert restored["status"] == "completed"
+    assert restored["stage"] == "saved"
+    assert restored["saved"] == completed["saved"]
+
+
+def test_running_task_is_marked_interrupted_after_restart(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    service = AdminService(RuntimeConfigStore(cfg))
+    task = service._new_task("test running task")
+    service._update_task(task.task_id, status="running", stage="indexing", progress=45)
+
+    restarted = AdminService(RuntimeConfigStore(cfg))
+    restored = restarted.get_task(task.task_id)
+    assert restored["status"] == "failed"
+    assert restored["stage"] == "interrupted"
+    assert restored["progress"] == 100

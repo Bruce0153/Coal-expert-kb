@@ -109,11 +109,11 @@ tokenizer:
     model: "remote-tokenizer"
     endpoint: "/tokenize"
   local:
-    provider: huggingface
-    model: "Qwen/Qwen3-8B"
+    provider: tiktoken
+    model: "cl100k_base"
     model_path: null
     device: auto
-    trust_remote_code: true
+    trust_remote_code: false
 
 embeddings:
   mode: remote

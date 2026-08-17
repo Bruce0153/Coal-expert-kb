@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
-from coal_kb.infra.security import AdminAuth
+from coal_kb.infra.security import AdminAuth, PublicRequestGuard
 
 
 class AdminLoginRequest(BaseModel):
@@ -16,14 +16,23 @@ class AdminAuthStatus(BaseModel):
     authenticated: bool
 
 
-def build_auth_router(auth: AdminAuth) -> APIRouter:
+def build_auth_router(
+    auth: AdminAuth,
+    guard: PublicRequestGuard | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api/auth/admin", tags=["auth"])
 
     @router.get("/status", response_model=AdminAuthStatus)
     def auth_status(request: Request) -> AdminAuthStatus:
         return AdminAuthStatus(authenticated=auth.is_authenticated(request))
 
-    @router.post("/login", response_model=AdminAuthStatus)
+    login_dependencies = [Depends(guard.protect)] if guard is not None else []
+
+    @router.post(
+        "/login",
+        response_model=AdminAuthStatus,
+        dependencies=login_dependencies,
+    )
     def login(payload: AdminLoginRequest, response: Response) -> AdminAuthStatus:
         auth.login(payload.password, response)
         return AdminAuthStatus(authenticated=True)

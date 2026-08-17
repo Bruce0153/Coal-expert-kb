@@ -1,6 +1,8 @@
 """组装 FastAPI、应用用例和网页静态资源。"""
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +27,8 @@ from coal_kb.interfaces.api.routes_chat import build_chat_router
 from coal_kb.interfaces.api.routes_settings import build_settings_router
 from coal_kb.interfaces.web import web_static_dir
 from coal_kb.operations import health_status, readiness_status
+
+LOGGER = logging.getLogger("coal_kb.api")
 
 
 def create_app() -> FastAPI:
@@ -58,6 +62,21 @@ def create_app() -> FastAPI:
 
     static_dir = web_static_dir()
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @app.exception_handler(Exception)
+    async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+        if not policy.public_mode:
+            raise exc
+        request_id = str(getattr(request.state, "request_id", "unknown"))
+        LOGGER.exception(
+            "Unhandled request error request_id=%s path=%s",
+            request_id,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "服务暂时不可用，请稍后再试。", "request_id": request_id},
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:

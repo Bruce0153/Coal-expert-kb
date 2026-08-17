@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, Text, create_engine, delete, desc, func, select
+from sqlalchemy import DateTime, String, Text, create_engine, delete, desc, func, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from .models import ConversationMessage, ConversationSummary
@@ -18,6 +18,7 @@ class ConversationModel(Base):
     __tablename__ = "conversations"
 
     conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="legacy", index=True)
     title: Mapped[str] = mapped_column(Text, default="New conversation")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -38,14 +39,29 @@ class ConversationStore:
     def __init__(self, sqlite_path: str) -> None:
         self._engine = create_engine(f"sqlite:///{sqlite_path}", future=True)
         Base.metadata.create_all(self._engine)
+        self._ensure_session_column()
 
-    def create_conversation(self, *, title: str | None = None) -> ConversationSummary:
+    def _ensure_session_column(self) -> None:
+        """为历史 SQLite 数据库执行一次向后兼容迁移。"""
+        columns = {column["name"] for column in inspect(self._engine).get_columns("conversations")}
+        if "session_id" not in columns:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE conversations ADD COLUMN session_id VARCHAR(64) NOT NULL DEFAULT 'legacy'")
+                )
+        with self._engine.begin() as connection:
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_conversations_session_id ON conversations (session_id)")
+            )
+
+    def create_conversation(self, *, title: str | None = None, session_id: str = "legacy") -> ConversationSummary:
         now = datetime.utcnow()
         conversation_id = uuid4().hex
         conversation_title = (title or "New conversation").strip() or "New conversation"
         with Session(self._engine) as session:
             model = ConversationModel(
                 conversation_id=conversation_id,
+                session_id=session_id,
                 title=conversation_title,
                 created_at=now,
                 updated_at=now,
@@ -60,9 +76,13 @@ class ConversationStore:
             message_count=0,
         )
 
-    def get_conversation(self, conversation_id: str) -> ConversationSummary | None:
+    def get_conversation(self, conversation_id: str, *, session_id: str = "legacy") -> ConversationSummary | None:
         with Session(self._engine) as session:
-            model = session.get(ConversationModel, conversation_id)
+            stmt = select(ConversationModel).where(
+                ConversationModel.conversation_id == conversation_id,
+                ConversationModel.session_id == session_id,
+            )
+            model = session.execute(stmt).scalar_one_or_none()
             if model is None:
                 return None
             count_stmt = select(func.count(MessageModel.message_id)).where(MessageModel.conversation_id == conversation_id)
@@ -75,15 +95,24 @@ class ConversationStore:
                 message_count=count,
             )
 
-    def list_conversations(self, *, limit: int = 50) -> list[ConversationSummary]:
+    def list_conversations(self, *, limit: int = 50, session_id: str = "legacy") -> list[ConversationSummary]:
         with Session(self._engine) as session:
-            stmt = select(ConversationModel).order_by(desc(ConversationModel.updated_at)).limit(limit)
-            models = session.execute(stmt).scalars().all()
-            counts_stmt = (
-                select(MessageModel.conversation_id, func.count(MessageModel.message_id))
-                .group_by(MessageModel.conversation_id)
+            stmt = (
+                select(ConversationModel)
+                .where(ConversationModel.session_id == session_id)
+                .order_by(desc(ConversationModel.updated_at))
+                .limit(limit)
             )
-            counts = {row[0]: int(row[1]) for row in session.execute(counts_stmt).all()}
+            models = session.execute(stmt).scalars().all()
+            conversation_ids = [model.conversation_id for model in models]
+            counts: dict[str, int] = {}
+            if conversation_ids:
+                counts_stmt = (
+                    select(MessageModel.conversation_id, func.count(MessageModel.message_id))
+                    .where(MessageModel.conversation_id.in_(conversation_ids))
+                    .group_by(MessageModel.conversation_id)
+                )
+                counts = {row[0]: int(row[1]) for row in session.execute(counts_stmt).all()}
             return [
                 ConversationSummary(
                     conversation_id=model.conversation_id,
@@ -95,13 +124,17 @@ class ConversationStore:
                 for model in models
             ]
 
-    def delete_conversation(self, conversation_id: str) -> bool:
+    def delete_conversation(self, conversation_id: str, *, session_id: str = "legacy") -> bool:
         with Session(self._engine) as session:
-            exists = session.get(ConversationModel, conversation_id)
+            stmt = select(ConversationModel).where(
+                ConversationModel.conversation_id == conversation_id,
+                ConversationModel.session_id == session_id,
+            )
+            exists = session.execute(stmt).scalar_one_or_none()
             if exists is None:
                 return False
             session.execute(delete(MessageModel).where(MessageModel.conversation_id == conversation_id))
-            session.execute(delete(ConversationModel).where(ConversationModel.conversation_id == conversation_id))
+            session.delete(exists)
             session.commit()
             return True
 
@@ -112,11 +145,16 @@ class ConversationStore:
         role: str,
         content: str,
         metadata: dict | None = None,
+        session_id: str = "legacy",
     ) -> ConversationMessage:
         now = datetime.utcnow()
         message_id = uuid4().hex
         with Session(self._engine) as session:
-            conversation = session.get(ConversationModel, conversation_id)
+            stmt = select(ConversationModel).where(
+                ConversationModel.conversation_id == conversation_id,
+                ConversationModel.session_id == session_id,
+            )
+            conversation = session.execute(stmt).scalar_one_or_none()
             if conversation is None:
                 raise KeyError(f"Conversation not found: {conversation_id}")
             model = MessageModel(
@@ -139,7 +177,15 @@ class ConversationStore:
             created_at=now,
         )
 
-    def list_messages(self, conversation_id: str, *, limit: int | None = None) -> list[ConversationMessage]:
+    def list_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int | None = None,
+        session_id: str = "legacy",
+    ) -> list[ConversationMessage]:
+        if self.get_conversation(conversation_id, session_id=session_id) is None:
+            raise KeyError(f"Conversation not found: {conversation_id}")
         with Session(self._engine) as session:
             stmt = (
                 select(MessageModel)
@@ -161,10 +207,14 @@ class ConversationStore:
                 for model in models
             ]
 
-    def update_title(self, conversation_id: str, title: str) -> None:
+    def update_title(self, conversation_id: str, title: str, *, session_id: str = "legacy") -> None:
         clean_title = title.strip() or "New conversation"
         with Session(self._engine) as session:
-            model = session.get(ConversationModel, conversation_id)
+            stmt = select(ConversationModel).where(
+                ConversationModel.conversation_id == conversation_id,
+                ConversationModel.session_id == session_id,
+            )
+            model = session.execute(stmt).scalar_one_or_none()
             if model is None:
                 raise KeyError(f"Conversation not found: {conversation_id}")
             model.title = clean_title

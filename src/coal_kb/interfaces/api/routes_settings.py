@@ -1,4 +1,4 @@
-"""定义运行配置读取、更新和恢复接口。"""
+"""定义仅管理员可读写的服务器运行配置接口。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ from coal_kb.interfaces.api.runtime_overrides import apply_runtime_overrides, bu
 
 def build_settings_router(configs: RuntimeConfigStore, auth: AdminAuth | None = None) -> APIRouter:
     auth = auth or AdminAuth(PublicSecurityPolicy.from_env())
-    router = APIRouter(prefix="/api/settings", tags=["settings"])
+    router = APIRouter(
+        prefix="/api/settings",
+        tags=["settings"],
+        dependencies=[Depends(auth.require_admin)],
+    )
 
     @router.get("/defaults", response_model=SettingsDefaultsResponse)
     def defaults() -> SettingsDefaultsResponse:
@@ -22,21 +26,13 @@ def build_settings_router(configs: RuntimeConfigStore, auth: AdminAuth | None = 
     def runtime() -> SettingsDefaultsResponse:
         return build_settings_defaults(configs.snapshot())
 
-    @router.put(
-        "/runtime",
-        response_model=SettingsDefaultsResponse,
-        dependencies=[Depends(auth.require_admin)],
-    )
+    @router.put("/runtime", response_model=SettingsDefaultsResponse)
     def update_runtime(payload: RuntimeSettingsRequest) -> SettingsDefaultsResponse:
         updated = apply_runtime_overrides(configs.snapshot(), payload)
         configs.replace(updated)
         return build_settings_defaults(updated)
 
-    @router.delete(
-        "/runtime",
-        response_model=SettingsDefaultsResponse,
-        dependencies=[Depends(auth.require_admin)],
-    )
+    @router.delete("/runtime", response_model=SettingsDefaultsResponse)
     def reset_runtime() -> SettingsDefaultsResponse:
         return build_settings_defaults(configs.reset())
 
